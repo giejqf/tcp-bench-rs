@@ -10,6 +10,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, net::IpAddr};
+pub mod terminal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -19,6 +20,7 @@ pub enum Measurement<T> {
     Error { message: String },
     Unsupported { message: String },
     Cancelled,
+    Skipped { message: String },
 }
 impl<T> Measurement<T> {
     pub fn from_result(result: Result<T>) -> Self {
@@ -54,6 +56,11 @@ pub struct NodeReport {
     pub throughput: Measurement<Transfer>,
     #[serde(default)]
     pub iperf3: Vec<IperfMeasurement>,
+    #[serde(default = "not_requested")]
+    pub large_quality: Measurement<Quality>,
+}
+fn not_requested<T>() -> Measurement<T> {
+    Measurement::NotRequested
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IperfMeasurement {
@@ -73,6 +80,17 @@ pub struct Report {
     pub enrichment_lookups: BTreeMap<IpAddr, Lookup>,
     #[serde(default)]
     pub enrichment_cache_error: Option<String>,
+    #[serde(default)]
+    pub benchmark: Option<BenchmarkInfo>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BenchmarkInfo {
+    pub matching_nodes: usize,
+    pub selected_nodes: usize,
+    pub count: u16,
+    pub rate: u32,
+    pub budget_seconds: u64,
+    pub notes: Vec<String>,
 }
 pub fn csv(report: &Report) -> String {
     // Names and meanings of the first eleven columns are observed public interface.
@@ -121,7 +139,7 @@ pub fn csv(report: &Report) -> String {
                 String::new(),
                 message.clone(),
             ),
-            Measurement::Unsupported { message } => (
+            Measurement::Unsupported { message } | Measurement::Skipped { message } => (
                 "unsupported",
                 String::new(),
                 String::new(),
@@ -149,6 +167,7 @@ pub fn csv(report: &Report) -> String {
             Measurement::Cancelled => ("cancelled".into(), String::new()),
             Measurement::Error { message } => ("error".into(), message.clone()),
             Measurement::Unsupported { message } => ("unsupported".into(), message.clone()),
+            Measurement::Skipped { message } => ("skipped".into(), message.clone()),
         };
         let mut fields = vec![
             row.node.kind.clone(),
@@ -237,6 +256,7 @@ mod tests {
             enrichment: BTreeMap::new(),
             enrichment_lookups: BTreeMap::new(),
             enrichment_cache_error: None,
+            benchmark: None,
         };
         let value = serde_json::to_value(&report).unwrap();
         assert_eq!(value["schema_version"], 1);

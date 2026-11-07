@@ -7,7 +7,8 @@ HTTP/TLS and iPerf3 also work on macOS.
 
 This is an independent implementation with a documented subset of TcpQuality's
 interfaces. It does not execute measurement helpers, install software, change
-firewall/routing settings, upload results, or contact a default node service.
+firewall/routing settings, or upload results. The default benchmark fetches a node catalog
+and ASN metadata; see the documented sources and opt-out controls.
 It does not claim full TcpQuality, NextTrace, or iPerf3 compatibility.
 
 ## One-command Linux entry point
@@ -18,8 +19,18 @@ On Linux x86-64 or ARM64 with **glibc 2.35+** (Bash, curl, GNU tar and coreutils
 bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh)
 ```
 
-With no arguments this downloads the pinned release and prints help. Supply
-explicit targets and budgets to measure, for example, from a root shell:
+With no arguments this runs the default benchmark and prints a readable report:
+standard SYN quality, a separate IPv4 1200-byte SYN check, outward TCP/UDP traces,
+and ASN/organization enrichment. Run from a root shell or use an installed binary
+with CAP_NET_RAW. `--help` shows help without starting a benchmark.
+
+The preset selects up to 32 nodes from TcpQuality's configurable `getNodes` CDN
+catalog, interleaved by family and ISP, with 25 probes/check and a five-minute
+budget. RIPEstat metadata lookups are enabled; use `--no-enrichment` to disable them.
+It sends no results to reporting/ranking services and runs no speed test by default.
+See [default benchmark](docs/default-benchmark.md) for bounds and service terms.
+
+To measure a specific target instead:
 
 ```sh
 bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh) \
@@ -36,8 +47,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/run
 
 The launcher downloads only this application's release archive and checksum over
 HTTPS, verifies SHA-256, runs it from a private temporary directory and cleans up.
-It forwards arguments and exit status, leaves stdout for the JSON report, and
-never invokes sudo, changes capabilities or selects a default public target.
+It forwards arguments and exit status, leaves stdout for the selected report format, and
+never invokes sudo or changes capabilities. Node selection and the benchmark run in Rust.
 It does not install anything persistently or check for updates. The native
 executable still performs every measurement itself. See [launcher and releases](docs/launcher.md)
 for pinned URLs, manual installation and release verification.
@@ -60,7 +71,7 @@ anchors. Ship `LICENSE`, `NOTICE`, and `third-party/` with binary distributions.
 
 ## Examples
 
-All measurements require explicit targets. These small examples target loopback;
+The examples below use explicit targets instead of the default preset. They target loopback;
 replace them with addresses you are authorized to measure. Raw measurements need
 Linux `CAP_NET_RAW` in the active network namespace. Grant that capability to the
 installed executable using your normal deployment tooling, or run it as root.
@@ -102,14 +113,18 @@ iPerf3 defaults to a 1 Mbit/s pacing target; explicitly choose `--iperf-bitrate 
 for an unlimited speed test within the byte/time budgets. Only single-stream TCP
 is supported. See [iPerf3 controls and accounting](docs/iperf3.md).
 
-Remote ASN/country metadata is opt-in with `--enrich-provider ipinfo-lite` and an
+The default preset includes RIPEstat ASN/organization metadata. For explicit-target
+runs, metadata remains opt-in. Choose `--enrich-provider ipinfo-lite` with an
 `IPINFO_TOKEN` environment variable, or a user-configured JSON endpoint. This
 discloses requested target/hop IPs to that provider after measurements; nonpublic
 addresses are skipped by default. Local metadata takes precedence. See
 [enrichment, privacy, cache and provider terms](docs/remote-enrichment.md).
 
-JSON is the default, with `schema_version: 1`. Diagnostics go to stderr. `--format
-csv` writes a documented quality/throughput subset; traceroute and remote enrichment require JSON.
+The default benchmark prints text; explicit-target runs keep JSON by default
+(`schema_version: 1`). Use `--format text|json|csv` to select output, or
+`--json-output report.json` to save complete per-probe data alongside the text report.
+Diagnostics/progress go to stderr. CSV is a quality/throughput subset; traces and
+remote enrichment require text or JSON.
 `--output PATH` creates a new report and refuses existing files. SIGINT, SIGTERM,
 or the total `--budget` stop work and retain measurements already obtained.
 

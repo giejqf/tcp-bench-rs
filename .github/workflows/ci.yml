@@ -22,6 +22,8 @@ jobs:
         run: TCP_BENCH_IPERF_INTEROP=1 cargo +stable test --locked --test iperf_interop -- --ignored
       - if: runner.os == 'Linux'
         run: sudo -E env PATH="$PATH" RUSTUP_HOME="$HOME/.rustup" CARGO_HOME="$HOME/.cargo" TCP_BENCH_LAB=loopback cargo +stable test --locked --test linux_raw -- --ignored
+      - if: runner.os == 'Linux'
+        run: sudo -E env PATH="$PATH" RUSTUP_HOME="$HOME/.rustup" CARGO_HOME="$HOME/.cargo" TCP_BENCH_BENCHMARK_LAB=loopback cargo +stable test --locked --test default_benchmark -- --ignored
   msrv:
     runs-on: ubuntu-latest
     steps:

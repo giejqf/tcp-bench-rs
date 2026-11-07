@@ -8,18 +8,19 @@ The one-command distribution entry point is:
 bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh)
 ```
 
-No arguments means help, with no measurement targets contacted. Append normal
-CLI options after the closing parenthesis. All measurements retain explicit
-targets and budgets; the launcher adds no automatic service discovery, enrichment,
-uploads or speed tests. Raw SYN/trace modes still need Linux CAP_NET_RAW or root;
-speed-only modes do not. The launcher never escalates privileges itself.
+No arguments starts the [default benchmark](default-benchmark.md), including a
+configurable CDN catalog, standard/large SYN probes, outward traces, default ASN
+enrichment and a text report. `--help` shows help instead. Append normal CLI
+options after the closing parenthesis. `--no-enrichment` disables remote metadata.
+No reports are uploaded and no default speed tests run. Raw modes need CAP_NET_RAW
+or root; the launcher never escalates privileges itself.
 
 ## Reproducible invocation and inspection
 
 For a launcher and binary pinned together to this release:
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/v0.1.0/runTcpBench.sh) \
+bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/v0.2.0/runTcpBench.sh) \
   --target 127.0.0.1 --iperf3 --max-bytes 65536 --duration 2 --budget 10
 ```
 
@@ -27,7 +28,7 @@ Alternatively download the script first, inspect it, then run it:
 
 ```sh
 curl -fSL --proto '=https' --proto-redir '=https' \
-  https://raw.githubusercontent.com/giejqf/tcp-bench-rs/v0.1.0/runTcpBench.sh \
+  https://raw.githubusercontent.com/giejqf/tcp-bench-rs/v0.2.0/runTcpBench.sh \
   -o runTcpBench.sh
 less runTcpBench.sh
 bash runTcpBench.sh --help
@@ -53,8 +54,8 @@ packages or measurement helpers and changes no firewall, routing or capabilities
 Each release has, for each target:
 
 ```text
-tcp-bench-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-tcp-bench-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tcp-bench-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+tcp-bench-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
 ```
 
 The archive contains the single executable, Apache license, NOTICE, all locked
@@ -78,10 +79,10 @@ from [Releases](https://github.com/giejqf/tcp-bench-rs/releases), then in the do
 directory run, adjusting the target if needed:
 
 ```sh
-sha256sum --check tcp-bench-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-mkdir tcp-bench-rs-v0.1.0
-tar -xzf tcp-bench-rs-v0.1.0-x86_64-unknown-linux-gnu.tar.gz -C tcp-bench-rs-v0.1.0
-./tcp-bench-rs-v0.1.0/tcp-bench-rs --help
+sha256sum --check tcp-bench-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+mkdir tcp-bench-rs-v0.2.0
+tar -xzf tcp-bench-rs-v0.2.0-x86_64-unknown-linux-gnu.tar.gz -C tcp-bench-rs-v0.2.0
+./tcp-bench-rs-v0.2.0/tcp-bench-rs --help
 ```
 
 Keep the license/notice files with redistributed binaries. Repeated tests can
@@ -99,6 +100,6 @@ silently overwrite published assets. Existing versions should remain immutable.
 
 Run `bash -n runTcpBench.sh scripts/package-release.sh`, ShellCheck on both scripts,
 and `python3 tests/launcher.py` on Linux. The launcher tests substitute local download
-fixtures and check argument/status forwarding, help defaults, unsupported hosts,
+fixtures and check argument/status forwarding, no-argument passthrough, unsupported hosts,
 checksum failures, invalid archives, notice inclusion, download failures and SIGTERM
 cleanup. Real release downloads are smoke-tested separately after publication.

@@ -1,4 +1,4 @@
-//! Optional local and explicitly enabled remote metadata. Measurement is independent.
+//! Local and provider metadata; the benchmark preset selects a remote provider. Measurement is independent.
 pub mod remote;
 use crate::{Error, Result, discovery::read_bounded};
 use serde::{Deserialize, Serialize};

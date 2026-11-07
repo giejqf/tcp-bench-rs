@@ -15,3 +15,4 @@ pub mod throughput;
 pub mod traceroute;
 
 pub use error::{Error, Result};
+pub mod benchmark;

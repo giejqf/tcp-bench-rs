@@ -64,7 +64,8 @@ general client's hidden pooling, resolver, decompression, or retry behavior.
 `iperf3.rs` owns an independently implemented control state machine and one TCP
 data stream per session. No upstream library or executable is a runtime dependency.
 Local and server-reported statistics remain separate. `enrichment/remote.rs`
-contains opt-in IPinfo Lite and custom JSON adapters, executed only after the
+contains RIPEstat, IPinfo Lite and custom JSON adapters (RIPEstat defaults on
+in the benchmark preset), executed only after the
 measurement pass. Provider parsing, disclosure filtering, rate/response/request
 bounds and optional caches are separate from packet engines. Bearer authentication
 uses the existing HTTP/TLS client with strict header validation and no redirects.

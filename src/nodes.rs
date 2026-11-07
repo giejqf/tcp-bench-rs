@@ -19,6 +19,15 @@ pub struct Node {
     pub isp: String,
     pub primary: Target,
     pub backup: Option<Target>,
+    /// Service supplied a backup name but no address; never resolved or used implicitly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved_backup: Option<UnresolvedBackup>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnresolvedBackup {
+    pub host: String,
+    pub port: u16,
+    pub target: String,
 }
 
 pub fn validate_ip(ip: IpAddr) -> Result<IpAddr> {
@@ -125,21 +134,45 @@ pub fn parse_tsv(bytes: &[u8]) -> Result<Vec<Node>> {
             };
         // The reference defaults the primary port to 80 for every type.
         let primary = target(fields[4], fields[5], fields[6], fields[7], 80)?;
+        let mut unresolved_backup = None;
         let backup = if fields.len() == 12 && fields[8..].iter().any(|f| !f.is_empty()) {
             if fields[9].is_empty() {
-                return Err(fail("backup fields require a backup IP".into()));
-            }
-            Some(target(
-                fields[8],
-                fields[9],
-                fields[10],
-                fields[11],
-                if matches!(kind, "cernet" | "cernet2") {
-                    443
+                let host = fields[8];
+                if host.is_empty() || host.len() > 253 || host.contains(['/', '@', '\\', ' ']) {
+                    return Err(fail("unresolved backup requires a valid hostname".into()));
+                }
+                let port = if fields[10].is_empty() {
+                    if matches!(kind, "cernet" | "cernet2") {
+                        443
+                    } else {
+                        80
+                    }
                 } else {
-                    80
-                },
-            )?)
+                    fields[10]
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|&p| p > 0)
+                        .ok_or_else(|| fail("invalid unresolved backup port".into()))?
+                };
+                unresolved_backup = Some(UnresolvedBackup {
+                    host: host.into(),
+                    port,
+                    target: fields[11].into(),
+                });
+                None
+            } else {
+                Some(target(
+                    fields[8],
+                    fields[9],
+                    fields[10],
+                    fields[11],
+                    if matches!(kind, "cernet" | "cernet2") {
+                        443
+                    } else {
+                        80
+                    },
+                )?)
+            }
         } else {
             None
         };
@@ -150,6 +183,7 @@ pub fn parse_tsv(bytes: &[u8]) -> Result<Vec<Node>> {
             isp: fields[3].into(),
             primary,
             backup,
+            unresolved_backup,
         });
         if nodes.len() > MAX_NODES {
             return Err(fail(format!("more than {MAX_NODES} nodes")));
@@ -174,6 +208,19 @@ mod tests {
     fn accepts_v6_and_empty_fields() {
         let n = parse_tsv(b"cernet2\t6\t\t\t\t2001:db8::1\t\t\n").unwrap();
         assert_eq!(n[0].primary.port, 80);
+    }
+    #[test]
+    fn unresolved_backup_is_preserved_without_inventing_an_address() {
+        let nodes = parse_tsv(
+            b"cdn\t6\tlab\tTest\tmain.test\t2001:db8::1\t80\t/path\tbackup.test\t\t80\t/backup\n",
+        )
+        .unwrap();
+        assert!(nodes[0].backup.is_none());
+        let backup = nodes[0].unresolved_backup.as_ref().unwrap();
+        assert_eq!(backup.host, "backup.test");
+        assert_eq!(backup.port, 80);
+        assert_eq!(backup.target, "/backup");
+        assert!(parse_tsv(b"cdn\t6\tlab\tTest\tmain.test\t2001:db8::1\t80\t/path\tbackup.test\t\t0\t/backup\n").is_err());
     }
     #[test]
     fn malformed_nodes_rejected() {

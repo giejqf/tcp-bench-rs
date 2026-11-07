@@ -1,5 +1,5 @@
 //! Remote adapters do not participate in packet measurement. Nothing here contacts
-//! a provider until an explicitly configured enrichment pass is requested.
+//! a provider until a configured enrichment pass is requested (including the benchmark preset).
 use super::{Database, Metadata, validate};
 use crate::{
     Error, Result,
@@ -21,18 +21,23 @@ const MAX_CACHE: usize = 8 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
+    RipeStat,
     IpinfoLite,
     Json,
 }
 impl Provider {
     pub fn name(self) -> &'static str {
         match self {
+            Self::RipeStat => "ripe_stat",
             Self::IpinfoLite => "ipinfo_lite",
             Self::Json => "json",
         }
     }
     fn attribution(self) -> Option<String> {
         match self {
+            Self::RipeStat => {
+                Some("RIPEstat / RIPE NCC and RIPE RIS — https://stat.ripe.net".into())
+            }
             Self::IpinfoLite => Some("IPinfo — https://ipinfo.io".into()),
             Self::Json => None,
         }
@@ -60,7 +65,17 @@ impl Config {
         if !endpoint.tls && (!self.allow_http || self.token.is_some()) {
             return Err(Error::Config("remote enrichment requires HTTPS; --allow-http permits unauthenticated local/custom endpoints only".into()));
         }
-        if self.provider == Provider::IpinfoLite && (self.token.is_none() || self.include_private) {
+        if self.provider != Provider::Json && self.include_private {
+            return Err(Error::Config(
+                "nonpublic enrichment is supported only by custom JSON providers".into(),
+            ));
+        }
+        if self.provider == Provider::RipeStat && self.token.is_some() {
+            return Err(Error::Config(
+                "RIPEstat does not use bearer authentication".into(),
+            ));
+        }
+        if self.provider == Provider::IpinfoLite && self.token.is_none() {
             return Err(Error::Config(
                 "IPinfo Lite requires a token and only supports public-IP lookups here".into(),
             ));
@@ -256,7 +271,11 @@ pub async fn enrich(
         } else {
             requests += 1;
             // Only the requested IP is sent; no probe statistics or source metadata.
-            let url = format!("{base}/{ip}");
+            let url = if config.provider == Provider::RipeStat {
+                format!("{base}?resource={ip}&max_related=0&sourceapp=tcp-bench-rs")
+            } else {
+                format!("{base}/{ip}")
+            };
             let result = cancel
                 .run(async {
                     tokio::time::timeout(config.timeout, async {
@@ -345,6 +364,7 @@ pub fn decode(provider: Provider, ip: IpAddr, bytes: &[u8]) -> Result<Option<Met
     }
     let invalid = || Error::Http("invalid enrichment JSON or field types".into());
     let (received, metadata) = match provider {
+        Provider::RipeStat => return decode_ripe(ip, bytes),
         Provider::Json => {
             let record: JsonRecord = serde_json::from_slice(bytes).map_err(|_| invalid())?;
             (
@@ -402,9 +422,121 @@ pub fn decode(provider: Provider, ip: IpAddr, bytes: &[u8]) -> Result<Option<Met
     Ok(Some(metadata))
 }
 
+fn decode_ripe(ip: IpAddr, bytes: &[u8]) -> Result<Option<Metadata>> {
+    #[derive(Deserialize)]
+    struct Reply {
+        status: String,
+        data: Data,
+    }
+    #[derive(Deserialize)]
+    struct Data {
+        resource: String,
+        announced: bool,
+        asns: Vec<Asn>,
+    }
+    #[derive(Deserialize)]
+    struct Asn {
+        asn: u32,
+        holder: Option<String>,
+    }
+    let invalid = || Error::Http("invalid RIPEstat prefix response".into());
+    let reply: Reply = serde_json::from_slice(bytes).map_err(|_| invalid())?;
+    if reply.status != "ok" || reply.data.asns.len() > 16 {
+        return Err(invalid());
+    }
+    let (prefix, length) = reply.data.resource.split_once('/').ok_or_else(invalid)?;
+    let prefix: IpAddr = prefix.parse().map_err(|_| invalid())?;
+    let length: u32 = length.parse().map_err(|_| invalid())?;
+    let matches = match (ip, prefix) {
+        (IpAddr::V4(ip), IpAddr::V4(prefix)) if length <= 32 => {
+            let mask = u32::MAX.checked_shl(32 - length).unwrap_or(0);
+            u32::from(ip) & mask == u32::from(prefix)
+                && u32::from(prefix) & mask == u32::from(prefix)
+        }
+        (IpAddr::V6(ip), IpAddr::V6(prefix)) if length <= 128 => {
+            let mask = u128::MAX.checked_shl(128 - length).unwrap_or(0);
+            u128::from(ip) & mask == u128::from(prefix)
+                && u128::from(prefix) & mask == u128::from(prefix)
+        }
+        _ => false,
+    };
+    if !matches {
+        return Err(Error::Http(
+            "RIPEstat prefix does not contain the requested IP".into(),
+        ));
+    }
+    if !reply.data.announced || reply.data.asns.is_empty() {
+        return Ok(None);
+    }
+    for origin in &reply.data.asns {
+        validate(&Metadata {
+            asn: Some(origin.asn),
+            organization: origin.holder.clone(),
+            location: None,
+        })
+        .map_err(|_| invalid())?;
+    }
+    // Multi-origin prefixes do not have a uniquely attributable ASN.
+    let metadata = if reply.data.asns.len() == 1 {
+        let origin = &reply.data.asns[0];
+        Metadata {
+            asn: Some(origin.asn),
+            organization: origin.holder.clone(),
+            location: None,
+        }
+    } else {
+        Metadata {
+            asn: None,
+            organization: Some(format!(
+                "Multiple BGP origins: {}",
+                reply
+                    .data
+                    .asns
+                    .iter()
+                    .map(|a| format!("AS{}", a.asn))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            location: None,
+        }
+    };
+    validate(&metadata).map_err(|_| invalid())?;
+    Ok(Some(metadata))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ripe_prefix_binding_and_multiple_origins() {
+        let record = serde_json::json!({"status":"ok","data":{"resource":"8.8.8.0/24","announced":true,"asns":[{"asn":64500,"holder":"Fixture"}]}});
+        let decode = |value: &serde_json::Value, ip: &str| {
+            super::decode(
+                Provider::RipeStat,
+                ip.parse().unwrap(),
+                &serde_json::to_vec(value).unwrap(),
+            )
+        };
+        assert_eq!(
+            decode(&record, "8.8.8.8").unwrap().unwrap().asn,
+            Some(64500)
+        );
+        assert!(decode(&record, "8.8.4.4").is_err());
+        let mut value = record.clone();
+        value["data"]["resource"] = serde_json::json!("8.8.8.1/24");
+        assert!(decode(&value, "8.8.8.8").is_err());
+        value["data"]["resource"] = serde_json::json!("2001:db8::/32");
+        assert!(decode(&value, "2001:db8::1").is_ok());
+        assert!(decode(&value, "8.8.8.8").is_err());
+        value = record.clone();
+        value["data"]["asns"] =
+            serde_json::json!([{"asn":64500,"holder":"A"},{"asn":64501,"holder":"B"}]);
+        let multi = decode(&value, "8.8.8.8").unwrap().unwrap();
+        assert_eq!(multi.asn, None);
+        assert!(multi.organization.unwrap().contains("AS64501"));
+        value["data"]["announced"] = serde_json::json!(false);
+        assert!(decode(&value, "8.8.8.8").unwrap().is_none());
+    }
     #[test]
     fn response_binding_and_validation() {
         let ip = "1.1.1.1".parse().unwrap();

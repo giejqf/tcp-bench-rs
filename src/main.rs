@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tcp_bench_rs::{
-    Error, Result,
+    Error, Result, benchmark,
     cli::{Cli, Format},
     discovery::{self, DiscoveryConfig},
     enrichment,
@@ -34,6 +34,24 @@ async fn main() {
 async fn execute(args: Cli) -> Result<i32> {
     args.validate()?;
     let remote_config = args.remote_enrichment()?;
+    // Fail before contacting the catalog on unsupported/unprivileged hosts.
+    if args.benchmark {
+        tcp_bench_rs::platform::check_capabilities(args.v6, Protocol::Tcp)?;
+    }
+    if args.benchmark {
+        eprintln!(
+            "Default benchmark: up to {} nodes, {} probes/check, {} probes/s, {}s total budget.",
+            args.max_nodes, args.count, args.rate, args.budget
+        );
+        eprintln!("Standard SYN + IPv4 1200-byte SYN + outward traces. Uploads/ranking disabled.");
+        if let Some(config) = &remote_config {
+            eprintln!(
+                "Enrichment: {} (public target/hop IPs disclosed; --no-enrichment disables).",
+                config.provider.name()
+            );
+        }
+        eprintln!("Loading nodes...");
+    }
     let started = tokio::time::Instant::now();
     let started_unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -72,7 +90,12 @@ async fn execute(args: Cli) -> Result<i32> {
             &client,
             &cancel,
         )
-        .await?
+        .await
+        .map_err(|error| {
+            Error::Nodes(format!(
+                "catalog fetch failed: {error}; configure --nodes-url URL or --nodes-file PATH"
+            ))
+        })?
     } else {
         args.target
             .iter()
@@ -88,6 +111,7 @@ async fn execute(args: Cli) -> Result<i32> {
                     target: String::new(),
                 },
                 backup: None,
+                unresolved_backup: None,
             })
             .collect()
     };
@@ -105,6 +129,7 @@ async fn execute(args: Cli) -> Result<i32> {
         ));
     }
     if args.list_nodes {
+        nodes.truncate(args.max_nodes as usize);
         output(
             &args,
             &serde_json::to_vec_pretty(&serde_json::json!({"schema_version":1,"nodes":nodes}))?,
@@ -112,7 +137,24 @@ async fn execute(args: Cli) -> Result<i32> {
         watcher.abort();
         return Ok(0);
     }
-    let per_node = if args.route {
+    let matching_nodes = nodes.len();
+    if args.benchmark {
+        nodes = benchmark::select(nodes, args.max_nodes as usize);
+    } else {
+        nodes.truncate(args.max_nodes as usize);
+    }
+    let selected_count = nodes.len();
+    let benchmark_info = args.benchmark.then(|| report::BenchmarkInfo {
+        matching_nodes, selected_nodes: nodes.len(), count:args.count,rate:args.rate,budget_seconds:args.budget,
+        notes:vec!["Subset interleaved by address family and ISP; duplicate IP/port pairs removed.".into(),
+            "Traces observe the outward path. ASN means BGP origin, not router ownership or route classification.".into()],
+    });
+    let per_node = if args.benchmark {
+        args.count as usize * 2
+            + args.max_hops as usize
+                * args.probes_per_hop as usize
+                * args.route_protocol.protocols().len()
+    } else if args.route {
         args.max_hops as usize
             * args.probes_per_hop as usize
             * args.route_protocol.protocols().len()
@@ -128,10 +170,10 @@ async fn execute(args: Cli) -> Result<i32> {
         ));
     }
     // Capability checks do not depend on any target being reachable.
-    if !args.speed_only() {
+    if !args.speed_only() && !args.benchmark {
         for v6 in [false, true] {
             if nodes.iter().any(|node| node.primary.ip.is_ipv6() == v6) {
-                for protocol in if args.route {
+                for protocol in if args.route || args.benchmark {
                     args.route_protocol.protocols()
                 } else {
                     vec![Protocol::Tcp]
@@ -163,7 +205,16 @@ async fn execute(args: Cli) -> Result<i32> {
             tasks.spawn(async move { (index, measure(node, args, client, rate, cancel).await) });
         }
         match tasks.join_next().await {
-            Some(Ok(row)) => rows.push(row),
+            Some(Ok(row)) => {
+                rows.push(row);
+                if args.benchmark {
+                    eprintln!(
+                        "Measurements completed: {}/{} nodes",
+                        rows.len(),
+                        selected_count
+                    );
+                }
+            }
             Some(Err(error)) => {
                 return Err(Error::Config(format!("measurement task failed: {error}")));
             }
@@ -187,6 +238,13 @@ async fn execute(args: Cli) -> Result<i32> {
     }
     let (metadata, enrichment_lookups, enrichment_cache_error) = if let Some(config) = remote_config
     {
+        if args.benchmark {
+            eprintln!(
+                "Enriching {} unique addresses (up to {} requests)...",
+                candidates.len(),
+                config.max_requests
+            );
+        }
         let enriched =
             enrichment::remote::enrich(&config, &client, &candidates, &database, &cancel).await?;
         (enriched.metadata, enriched.lookups, enriched.cache_error)
@@ -202,15 +260,17 @@ async fn execute(args: Cli) -> Result<i32> {
         (metadata, lookups, None)
     };
     let failed = cancel.is_cancelled()
+        || (args.benchmark && rows.iter().all(|row| matches!(row.quality,Measurement::Skipped{..})))
         || enrichment_cache_error.is_some()
         || enrichment_lookups.values().any(enrichment::remote::Lookup::failed)
         || rows.iter().any(|row| {
-            row.quality.failed()
+            row.quality.failed() || row.large_quality.failed()
                 || row.throughput.failed()
                 || row.iperf3.iter().any(|result|result.measurement.failed()||matches!(&result.measurement,Measurement::Complete{data} if data.error.is_some()||data.result_exchange=="cancelled"||data.stop_reason=="cancelled"))
                 || row.traces.iter().any(Measurement::failed)
                 || row.traces.iter().any(|trace|matches!(trace,Measurement::Complete{data} if data.hops.iter().flat_map(|hop|&hop.probes).any(|probe|probe.status==probe::ProbeStatus::SendError)))
                 || matches!(&row.quality,Measurement::Complete{data} if data.summary.send_errors>0)
+                || matches!(&row.large_quality,Measurement::Complete{data} if data.summary.send_errors>0)
                 || matches!(&row.throughput,Measurement::Complete{data} if data.error.is_some())
         });
     let report = Report {
@@ -223,11 +283,17 @@ async fn execute(args: Cli) -> Result<i32> {
         enrichment: metadata,
         enrichment_lookups,
         enrichment_cache_error,
+        benchmark: benchmark_info,
     };
     let bytes = match args.format {
+        Format::Text => report::terminal::render(&report).into_bytes(),
         Format::Json => serde_json::to_vec_pretty(&report)?,
         Format::Csv => report::csv(&report).into_bytes(),
     };
+    if let Some(path) = &args.json_output {
+        write_report(Some(path), &serde_json::to_vec_pretty(&report)?)?;
+        eprintln!("Full JSON report saved to {}", path.display());
+    }
     output(&args, &bytes)?;
     watcher.abort();
     Ok(if failed { 1 } else { 0 })
@@ -248,8 +314,38 @@ async fn measure(
         traces: Vec::new(),
         throughput: Measurement::NotRequested,
         iperf3: Vec::new(),
+        large_quality: Measurement::NotRequested,
     };
-    if args.route {
+    if args.benchmark {
+        if cancel.is_cancelled() {
+            row.quality = Measurement::Cancelled;
+            return row;
+        }
+        if let Err(error) = benchmark::route_available(node.primary.ip).await {
+            row.quality = Measurement::Skipped {
+                message: format!("No usable local route: {error}"),
+            };
+            return row;
+        }
+    }
+    if !args.route && !args.speed_only() {
+        row.quality = if cancel.is_cancelled() {
+            Measurement::Cancelled
+        } else {
+            Measurement::from_result(
+                quality(&node, &args, args.size as usize, &rate, &cancel).await,
+            )
+        };
+        if args.benchmark && node.family == 4 {
+            // Keep cancellation inside an active quality run to retain its partial samples.
+            row.large_quality = if cancel.is_cancelled() {
+                Measurement::Cancelled
+            } else {
+                Measurement::from_result(quality(&node, &args, 1200, &rate, &cancel).await)
+            };
+        }
+    }
+    if args.route || args.benchmark {
         for protocol in args.route_protocol.protocols() {
             row.traces.push(Measurement::from_result(
                 traceroute::trace(
@@ -268,56 +364,6 @@ async fn measure(
                 .await,
             ));
         }
-    } else if !args.speed_only() {
-        let quality = async {
-            let mut engine = ProbeEngine::new(node.primary.ip, Protocol::Tcp).await?;
-            let mut probes = Vec::new();
-            let mut completion = "complete";
-            for _ in 0..args.count {
-                match engine
-                    .attempt(
-                        node.primary.port,
-                        args.size as usize,
-                        64,
-                        Duration::from_millis(args.timeout_ms),
-                        &rate,
-                        &cancel,
-                    )
-                    .await
-                {
-                    Ok(outcome) => {
-                        let interrupted = outcome.status == probe::ProbeStatus::Cancelled;
-                        probes.push(outcome);
-                        if interrupted {
-                            completion = "cancelled";
-                            break;
-                        }
-                    }
-                    Err(Error::Cancelled) => {
-                        completion = "cancelled";
-                        break;
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-            let mut summary = probe::summarize(&probes);
-            if completion == "cancelled" {
-                summary.unanswered_percent = None;
-            }
-            Ok(Quality {
-                source: engine.source(),
-                packet_size: (args.size as usize)
-                    .max(Protocol::Tcp.minimum_size(node.primary.ip.is_ipv6())),
-                completion: completion.into(),
-                summary,
-                probes,
-            })
-        };
-        row.quality = if cancel.is_cancelled() {
-            Measurement::Cancelled
-        } else {
-            Measurement::from_result(quality.await)
-        };
     }
     if args.speed_enabled() {
         if args.iperf3 || node.kind == "iperf3" {
@@ -358,6 +404,55 @@ async fn measure(
     }
     row
 }
+async fn quality(
+    node: &Node,
+    args: &Cli,
+    size: usize,
+    rate: &RateLimiter,
+    cancel: &Cancellation,
+) -> Result<Quality> {
+    let mut engine = ProbeEngine::new(node.primary.ip, Protocol::Tcp).await?;
+    let mut probes = Vec::new();
+    let mut completion = "complete";
+    for _ in 0..args.count {
+        match engine
+            .attempt(
+                node.primary.port,
+                size,
+                64,
+                Duration::from_millis(args.timeout_ms),
+                rate,
+                cancel,
+            )
+            .await
+        {
+            Ok(outcome) => {
+                let interrupted = outcome.status == probe::ProbeStatus::Cancelled;
+                probes.push(outcome);
+                if interrupted {
+                    completion = "cancelled";
+                    break;
+                }
+            }
+            Err(Error::Cancelled) => {
+                completion = "cancelled";
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let mut summary = probe::summarize(&probes);
+    if completion == "cancelled" {
+        summary.unanswered_percent = None;
+    }
+    Ok(Quality {
+        source: engine.source(),
+        packet_size: (size).max(Protocol::Tcp.minimum_size(node.primary.ip.is_ipv6())),
+        completion: completion.into(),
+        summary,
+        probes,
+    })
+}
 fn transfer_url(node: &Node, args: &Cli) -> Result<String> {
     let url = if let Some(url) = &args.url {
         url.clone()
@@ -379,7 +474,10 @@ fn transfer_url(node: &Node, args: &Cli) -> Result<String> {
     Ok(url)
 }
 fn output(args: &Cli, bytes: &[u8]) -> Result<()> {
-    let mut writer: Box<dyn Write> = if let Some(path) = &args.output {
+    write_report(args.output.as_deref(), bytes)
+}
+fn write_report(path: Option<&std::path::Path>, bytes: &[u8]) -> Result<()> {
+    let mut writer: Box<dyn Write> = if let Some(path) = path {
         Box::new(
             std::fs::OpenOptions::new()
                 .write(true)

@@ -113,6 +113,15 @@ docker run --rm --network none \
 
 ## Validation record and remaining limits
 
+The v0.2 default preset adds deterministic selection/CLI/RIPEstat-prefix/text
+rendering tests and gated loopback CLI tests. The latter cover a true no-argument
+run (catalog overridden by an explicit local fixture), standard/large SYN results,
+TCP/UDP traces, nonpublic enrichment filtering and a custom provider/JSON sidecar.
+Run them with `TCP_BENCH_BENCHMARK_LAB=loopback cargo test --locked --test default_benchmark -- --ignored`.
+Their budgets are at most 80 and 10 loopback probes respectively. The live catalog
+was parsed without probing it (186 nodes at validation time); a single RIPEstat
+metadata response was checked. No public default benchmark is run by routine CI.
+
 The iPerf3/enrichment implementation passed 48 deterministic tests on macOS and
 47 on Linux, including Linux Rust 1.85. Formatting and Clippy with warnings denied
 passed on current Rust. Eight gated interoperability sessions each passed against

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 
 readonly repository='giejqf/tcp-bench-rs'
-readonly version="${TCP_BENCH_RS_VERSION:-v0.1.0}"
+readonly version="${TCP_BENCH_RS_VERSION:-v0.2.0}"
 temporary=''
 child=''
 
@@ -80,10 +80,6 @@ tar -xzf "$temporary/$asset" -C "$temporary/unpacked" --no-same-owner --no-same-
 [[ -f "$temporary/unpacked/tcp-bench-rs" ]] || fail 'release executable is not a regular file'
 [[ -f "$temporary/unpacked/LICENSE" && -f "$temporary/unpacked/NOTICE" && -d "$temporary/unpacked/third-party" ]] || fail 'release license notices are missing'
 chmod 700 "$temporary/unpacked/tcp-bench-rs"
-if (( $# == 0 )); then
-    printf 'tcp-bench-rs launcher: supply --target IP or --nodes-file PATH to measure; no default targets are contacted.\n' >&2
-    set -- --help
-fi
 "$temporary/unpacked/tcp-bench-rs" "$@" <&0 &
 child=$!
 status=0

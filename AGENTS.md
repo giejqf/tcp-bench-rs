@@ -31,7 +31,7 @@ The motivation is a small, auditable runtime: no downloaded executables, shell p
 - Treat remote node data as untrusted input. Bound response size, validate addresses and ports, and reject malformed records with actionable errors. Never execute values from responses.
 - Cache node responses with an explicit expiry and provide bounded timeouts and retries. Keep service-specific adapters out of the measurement engine.
 - Preserve CSV field meanings where compatibility is implemented and provide versioned structured JSON output. Distinguish missing measurements, unsupported capabilities, timeouts, and actual zero values.
-- Make report uploads, ranking participation, and external enrichment explicit options. Document this difference from the original defaults. Never silently transmit results or public-IP metadata to a reporting service.
+- Keep report uploads and ranking participation disabled unless explicitly requested. Per the user’s updated requirement, the default benchmark includes ASN enrichment; provide --no-enrichment, disclose the provider, preserve attribution, and keep explicit-target runs opt-in. Document this difference from the original defaults. Never silently transmit results or public-IP metadata to a reporting service.
 
 ## Measurement correctness
 
@@ -75,8 +75,9 @@ The motivation is a small, auditable runtime: no downloaded executables, shell p
 - `src/packet.rs` contains portable codecs/correlation; `src/platform/` owns Linux raw transmission and packet capture, including checksum-offload metadata.
 - `src/probe.rs`, `src/traceroute.rs`, and `src/scheduler.rs` implement bounded raw measurements and cancellation.
 - `src/nodes.rs`, `src/discovery.rs`, `src/http.rs`, `src/throughput.rs`, `src/tcp_stats.rs`, `src/enrichment.rs`, and `src/report.rs` remain separate concerns.
+- `src/benchmark.rs` selects a bounded default catalog sample; `src/report/terminal.rs` renders readable reports. The user authorized default discovery and ASN enrichment; see `docs/default-benchmark.md`. Live development/CI tests must still use explicit local fixtures and budgets.
 - `src/iperf3.rs` implements native single-stream TCP upload/download; `src/enrichment/remote.rs` contains explicit IPinfo Lite/custom JSON adapters. Keep protocol/result accounting and remote metadata separate from probes. Their contracts are in `docs/iperf3.md` and `docs/remote-enrichment.md`.
 - `docs/compatibility.md` records implemented interfaces and explicit omissions; `docs/measurements.md` defines units, denominators, and JSON v1 semantics.
 - `tests/linux_raw.rs` and `tests/routed_lab.rs` are ignored privileged tests. `tests/lab.sh` and `tests/lab.Dockerfile` are disposable development tooling, never runtime dependencies. Follow `docs/validation.md` for their explicit targets, budgets, and isolation.
 - Ship `third-party/` notices with binaries. Refresh its locked license inventory and the native-code audit when dependencies change.
-- `runTcpBench.sh` is an explicitly requested distribution launcher, separate from the Rust runtime: it downloads a pinned release, verifies its checksum, unpacks notices and runs the application. It must never install measurement helpers, choose public test targets, escalate privileges automatically or check for newer versions. `.github/workflows/release.yml` builds/tests native Linux release archives; `tests/launcher.py` tests the launcher offline.
+- `runTcpBench.sh` is an explicitly requested distribution launcher, separate from the Rust runtime: it downloads a pinned release, verifies its checksum, unpacks notices and runs the application. It must never install measurement helpers, escalate privileges automatically or check for newer versions. `.github/workflows/release.yml` builds/tests native Linux release archives; `tests/launcher.py` tests the launcher offline.

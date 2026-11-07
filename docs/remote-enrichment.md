@@ -1,7 +1,9 @@
-# Explicit remote enrichment
+# Remote enrichment
 
 Measurements run independently of metadata. Nothing contacts an enrichment
-provider unless `--enrich-provider` is supplied. Enrichment runs **after** probes
+provider unless `--enrich-provider` is supplied or the default benchmark is selected.
+The benchmark defaults to RIPEstat ASN/organization metadata; `--no-enrichment`
+disables it. Explicit-target runs without --benchmark retain opt-in metadata. Enrichment runs **after** probes
 and transfers, collecting unique target and responding-hop addresses. Existing
 `--enrichment-file` exact-IP records take precedence, so those addresses are not
 sent to a remote provider. A lookup failure never discards measurements.
@@ -11,9 +13,35 @@ source IP to that provider. No probe statistics or report are uploaded. Nonpubli
 addresses are skipped by a conservative local policy (including private, loopback,
 link-local, documentation, multicast and shared-address space). This policy is not
 a complete global routing registry. `--enrich-private` explicitly permits those
-lookups only for the custom JSON adapter. Remote enrichment requires JSON output
+lookups only for the custom JSON adapter. Remote enrichment requires text or JSON output
 so per-IP status and attribution are retained; it is not accepted with list-only
 mode or CSV output.
+
+## RIPEstat (default benchmark provider)
+
+`--enrich-provider ripe-stat` uses the public `prefix-overview` HTTPS API without
+an account/token. It reports the observed BGP origin ASN and its descriptive holder.
+The returned prefix must contain the queried IP; malformed, non-canonical or
+wrong-family prefixes are rejected. Multiple-origin prefixes retain a null ASN
+and an explicit list of origin ASNs; no arbitrary single owner is invented.
+There is no country/city lookup in this adapter. Origin ASN is not proof of router
+ownership or a commercial route classification.
+
+Attribution identifies RIPEstat, RIPE NCC and RIPE RIS. The adapter sends the IP
+in the resource query and a `sourceapp=tcp-bench-rs` identifier. Existing timeout,
+response, request-count, pacing, local-precedence and nonpublic-address policies
+apply. No datasets are bundled. Optional caches are local and must be used in
+accordance with provider terms, not treated as a redistribution license.
+
+Primary sources: [prefix schema](https://stat.ripe.net/docs/data-api/api-endpoints/prefix-overview.html),
+[API usage rules](https://stat.ripe.net/docs/data-api/ripestat-data-api), and
+[service terms](https://www.ripe.net/about-us/legal/ripestat-service-terms-and-conditions/).
+The service is intended for network analysis/monitoring/debugging. Its terms
+restrict repackaging/redistribution and commercial use without written permission;
+choose another provider or `--no-enrichment` where those terms do not fit your use.
+The API asks users to register regular usage above 1000 requests/day. The preset
+uses sequential requests, two starts/second, at most 128 requests/run. No contact
+or registration is performed automatically.
 
 ## IPinfo Lite
 
@@ -91,4 +119,5 @@ metadata and the explicit request limit are not measurement failures.
 
 Tests use local HTTP/TLS servers and independent provider fixtures, covering
 response binding, cache identity/expiry, cancellation, limits, authentication,
-and explicit CLI opt-in. No live IPinfo account or public endpoint was exercised.
+and explicit CLI opt-in. No live IPinfo account was exercised. A single RIPEstat prefix response was checked;
+ordinary tests use independent local fixtures.

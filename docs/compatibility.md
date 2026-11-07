@@ -1,4 +1,4 @@
-# Compatibility contract, version 0.1
+# Compatibility contract, version 0.2
 
 Interface observations used the separate `../TcpQuality` checkout at commit
 `6017af3fcb83b300b9a15b058d58062551d1c682`. Only CLI, serialized field meanings,
@@ -13,8 +13,9 @@ help use **0 (empty SYN)**. This implementation follows that observed default.
 
 | Interface | Behavior here |
 | --- | --- |
+| no arguments / `--benchmark` | Bounded catalog-based SYN/large-SYN/TCP+UDP trace preset, default RIPEstat metadata, text report; see default-benchmark.md |
 | `-h`, `--help`, `--version` | Native help/version; no networking |
-| `-c`, `--count` | 1–600, default 30 per node |
+| `-c`, `--count` | 1–600, default 25 in benchmark, 30 otherwise |
 | `-s`, `--size` | IP total bytes, 0–65535, default 0; smaller sizes raised to protocol minimum |
 | `-p`, `--parallel` | 1–31 active nodes, fixed default 4; no memory-based auto-tuning |
 | `-v4`, `--v4`, `-v6`, `--v6` | Filter family; conflicting choices rejected |
@@ -31,7 +32,7 @@ help use **0 (empty SYN)**. This implementation follows that observed default.
 | `--debug` | Progress on stderr; no raw packet or credential logging |
 | `--iperf3` | Native single-stream TCP; implies speed-only unless `--speedtest` is also set |
 | `--iperf-direction`, `--iperf-bitrate` | upload/download/both (default download); pacing bits/s (default 1 Mbit/s, 0 unlimited) |
-| `--enrich-provider` | Explicit remote IPinfo Lite or custom JSON provider; see remote-enrichment.md |
+| `--enrich-provider` | RIPEstat (default benchmark), IPinfo Lite or custom JSON; --no-enrichment disables remote lookups; see remote-enrichment.md |
 | `--all`, `--intl` | Unsupported service catalogs; explicit targets/node files still work |
 | `-bj` and other province shorthands | Unsupported; use `--province` matching node data |
 
@@ -40,8 +41,9 @@ Native controls include `--target` (repeatable IP literal), `--nodes-file`,
 `--rate`, `--timeout-ms`, `--budget`, `--setup-timeout`, `--allow-http`,
 `--enrichment-file`, `--format`, and `--output`. See `--help` for bounds.
 Unknown flags are errors. `--scope` affects the discovery request only; `--cernet`
-and family/province flags filter the returned data. No selection implies a service
-request. Explicit targets, a local file, or a service URL are always required.
+and family/province flags filter the returned data. Omitting a source selects the configurable TcpQuality getNodes URL; omitting both
+a source and a specialized mode selects the benchmark preset. Explicit inputs
+retain their existing JSON/measurement behavior unless --benchmark is selected.
 
 ## getNodes adapter
 
@@ -68,7 +70,9 @@ Types: `cdn`, `cernet`, `cernet2`, `telegram`, `tos`, `tosutil`, `speedtest`,
 CERNET is IPv4 and CERNET2 IPv6. Unknown types and malformed records fail with line
 numbers. Primary empty ports default to 80 (as observed in the reference), backup
 ports to 443 for CERNET/CERNET2 and 80 otherwise. Explicit zero/invalid ports fail.
-IP literals must match the family. Broadcast, multicast, unspecified, IPv4-mapped
+Backups with a hostname but no resolved IP are retained in `unresolved_backup`
+(host, port, target), with `backup: null`; no implicit DNS resolution or failover
+is performed. IP literals must match the family. Broadcast, multicast, unspecified, IPv4-mapped
 IPv6, and unscoped link-local IPv6 destinations are rejected. No zone/interface
 selection for link-local IPv6 is implemented.
 
@@ -100,11 +104,11 @@ import them as text in spreadsheet software.
 
 CSV status strings and category values are native identifiers, not a byte-for-byte
 replica of the reference's Chinese labels. No route classification, reverse-path
-connection/TLS times, or iPerf3 counters are invented. Traceroute requires JSON.
+connection/TLS times, or iPerf3 counters are invented. Traceroute requires text or JSON.
 Partial/cancelled runs have no loss percentage. A transfer stopped at its explicit
 budget retains its actual counted bytes and stop reason.
 
-Native iPerf3 and opt-in remote enrichment are detailed in [iperf3.md](iperf3.md)
+Native iPerf3 and selectable remote enrichment are detailed in [iperf3.md](iperf3.md)
 and [remote-enrichment.md](remote-enrichment.md). JSON v1 adds per-direction
 `nodes[].iperf3`, `enrichment_lookups`, and `enrichment_cache_error`; existing
 fields keep their meanings. CSV appends separate iPerf3 upload/download counters,
@@ -113,7 +117,7 @@ statuses, remote sender retransmissions and errors after the existing 17 columns
 Not implemented: iPerf3 UDP/SCTP/multistream/authentication/server mode, HTTPS upload
 throughput, reverse-path tracing, Internet/CDN endpoint catalogs, AS route classification, report uploads,
 ranking, automatic updates, automatic backup failover, automatic UDP traces during
-quality runs, Paris traceroute, MPLS decoding, PTR lookups, and interactive UI.
-Unknown flags fail. Local and explicitly enabled remote enrichment are independent
+quality runs, Paris traceroute, MPLS decoding, PTR lookups, and interactive UI. Plain text reports are supported.
+Unknown flags fail. Local and remote enrichment (default in the benchmark preset) are independent
 of probes, and no remote reporting is implemented. These
 limits mean there is no claim of full TcpQuality or NextTrace compatibility.

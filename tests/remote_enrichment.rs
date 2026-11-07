@@ -267,6 +267,37 @@ fn provider_configuration_never_accepts_insecure_credentials() {
 }
 
 #[tokio::test]
+async fn ripe_adapter_requests_bound_prefix_metadata_without_a_token() {
+    let (mut config,server)=server(200,r#"{"status":"ok","data":{"resource":"1.1.1.0/24","announced":true,"asns":[{"asn":64500,"holder":"Fixture"}]}}"#.into()).await;
+    config.provider = Provider::RipeStat;
+    let result = remote::enrich(
+        &config,
+        &Client::default(),
+        &ips(&["1.1.1.1"]),
+        &BTreeMap::new(),
+        &Cancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result.metadata[&"1.1.1.1".parse().unwrap()].asn,
+        Some(64500)
+    );
+    let request = server.await.unwrap();
+    assert!(request.starts_with(
+        "GET /metadata?resource=1.1.1.1&max_related=0&sourceapp=tcp-bench-rs HTTP/1.1"
+    ));
+    assert!(!request.contains("Authorization:"));
+    assert!(
+        result.lookups[&"1.1.1.1".parse().unwrap()]
+            .attribution
+            .as_deref()
+            .unwrap()
+            .contains("RIPE")
+    );
+}
+
+#[tokio::test]
 async fn cli_enrichment_is_opt_in_and_runs_after_transfer() {
     for enabled in [false, true] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

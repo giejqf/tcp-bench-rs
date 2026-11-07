@@ -3,7 +3,7 @@ use crate::{
     enrichment::remote::{self, Provider},
     iperf3::Direction,
 };
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum, parser::ValueSource};
 use std::{net::IpAddr, path::PathBuf};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -24,6 +24,7 @@ impl IperfDirection {
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum Format {
+    Text,
     Json,
     Csv,
 }
@@ -49,15 +50,21 @@ impl TraceProtocol {
 #[command(
     version,
     about = "Native TCP SYN quality, outward traceroute, HTTPS and iPerf3 throughput",
-    after_help = "Raw measurements require Linux CAP_NET_RAW. No results are uploaded.\nTargets and transfer budgets are explicit. See docs/compatibility.md for differences."
+    after_help = "No arguments runs the bounded default benchmark with ASN enrichment.\nRaw measurements require Linux CAP_NET_RAW. No results are uploaded.\nUse --no-enrichment to disable remote metadata. See docs/compatibility.md."
 )]
 pub struct Cli {
+    /// Standard/large SYN quality and outward TCP/UDP traces; implicit without a source or mode
+    #[arg(long,conflicts_with_all=["route","only_speedtest","only_large","list_nodes"])]
+    pub benchmark: bool,
+    /// Maximum selected nodes (benchmark default 32, other modes 4096)
+    #[arg(long,default_value_t=4096,value_parser=clap::value_parser!(u16).range(1..=4096))]
+    pub max_nodes: u16,
     /// Explicit destination IP; repeat to measure several hosts
     #[arg(long,conflicts_with_all=["nodes_file","nodes_url"])]
     pub target: Vec<IpAddr>,
     #[arg(long, conflicts_with = "nodes_url")]
     pub nodes_file: Option<PathBuf>,
-    /// getNodes service base URL; no service is contacted by default
+    /// getNodes service base URL; default benchmark uses TcpQuality's catalog
     #[arg(long)]
     pub nodes_url: Option<String>,
     #[arg(long,default_value="cdn",value_parser=["cdn","v4","v6","cernet","all","tos","apple6","telegram"])]
@@ -142,35 +149,120 @@ pub struct Cli {
     /// Local exact-IP metadata JSON; never triggers remote enrichment
     #[arg(long)]
     pub enrichment_file: Option<PathBuf>,
+    /// Disable remote enrichment, including the default benchmark's ASN lookups
+    #[arg(long, conflicts_with_all=["enrich_provider","enrich_url","enrich_token_env","enrich_cache","enrich_private"])]
+    pub no_enrichment: bool,
     /// OPT IN: disclose target/hop IPs to this remote provider after measurements
     #[arg(long, value_enum)]
     pub enrich_provider: Option<Provider>,
     /// Provider base URL; lookups append /IP. Required for the json adapter
-    #[arg(long, requires = "enrich_provider")]
+    #[arg(long)]
     pub enrich_url: Option<String>,
     /// Environment variable containing a bearer token (IPinfo default: IPINFO_TOKEN)
-    #[arg(long, requires = "enrich_provider")]
+    #[arg(long)]
     pub enrich_token_env: Option<String>,
-    #[arg(long, requires = "enrich_provider")]
+    #[arg(long)]
     pub enrich_cache: Option<PathBuf>,
-    #[arg(long,requires="enrich_provider",default_value_t=3600,value_parser=clap::value_parser!(u64).range(0..=86400))]
+    #[arg(long,default_value_t=3600,value_parser=clap::value_parser!(u64).range(0..=86400))]
     pub enrich_cache_ttl: u64,
-    #[arg(long,requires="enrich_provider",default_value_t=5,value_parser=clap::value_parser!(u64).range(1..=30))]
+    #[arg(long,default_value_t=5,value_parser=clap::value_parser!(u64).range(1..=30))]
     pub enrich_timeout: u64,
-    #[arg(long,requires="enrich_provider",default_value_t=2,value_parser=clap::value_parser!(u32).range(1..=10))]
+    #[arg(long,default_value_t=2,value_parser=clap::value_parser!(u32).range(1..=10))]
     pub enrich_rate: u32,
-    #[arg(long,requires="enrich_provider",default_value_t=128,value_parser=clap::value_parser!(u16).range(1..=4096))]
+    #[arg(long,default_value_t=128,value_parser=clap::value_parser!(u16).range(1..=4096))]
     pub enrich_max_requests: u16,
     /// Also disclose nonpublic IPs to a user-configured JSON provider
-    #[arg(long, requires = "enrich_provider")]
+    #[arg(long)]
     pub enrich_private: bool,
     #[arg(long,value_enum,default_value_t=Format::Json)]
     pub format: Format,
     /// Write report to a new file instead of stdout (existing files are refused)
     #[arg(short = 'o', long)]
     pub output: Option<PathBuf>,
+    /// Also save the complete JSON report to a new file
+    #[arg(long)]
+    pub json_output: Option<PathBuf>,
 }
 impl Cli {
+    /// Resolve preset defaults without overriding explicitly supplied options.
+    pub fn from_matches_with_defaults(
+        matches: &clap::ArgMatches,
+    ) -> std::result::Result<Self, clap::Error> {
+        let mut args = Self::from_arg_matches(matches)?;
+        let no_source =
+            args.target.is_empty() && args.nodes_file.is_none() && args.nodes_url.is_none();
+        args.benchmark |= no_source
+            && !args.route
+            && !args.speed_enabled()
+            && !args.list_nodes
+            && !args.only_large;
+        if no_source {
+            if let Some(path) = std::env::var_os("TCP_BENCH_NODES_FILE") {
+                args.nodes_file = Some(path.into());
+            } else if args.speed_enabled() && !args.benchmark {
+                // A missing speed-test target must not turn CDN hosts into iPerf3 endpoints.
+                args.nodes_url = std::env::var("TCP_BENCH_NODES_URL").ok();
+            } else {
+                args.nodes_url = Some(
+                    std::env::var("TCP_BENCH_NODES_URL")
+                        .unwrap_or_else(|_| "https://tcpquality.ibsgss.uk/getNodes".into()),
+                );
+            }
+        }
+        let default = |name| matches.value_source(name) != Some(ValueSource::CommandLine);
+        if args.benchmark {
+            if default("count") {
+                args.count = 25;
+            }
+            if default("parallel") {
+                args.parallel = 8;
+            }
+            if default("rate") {
+                args.rate = 50;
+            }
+            if default("timeout_ms") {
+                args.timeout_ms = 500;
+            }
+            if default("max_hops") {
+                args.max_hops = 16;
+            }
+            if default("probes_per_hop") {
+                args.probes_per_hop = 1;
+            }
+            if default("route_protocol") {
+                args.route_protocol = TraceProtocol::Both;
+            }
+            if default("max_nodes") {
+                args.max_nodes = 32;
+            }
+            if default("format") {
+                args.format = Format::Text;
+            }
+            if !args.no_enrichment && args.enrich_provider.is_none() {
+                args.enrich_provider = Some(Provider::RipeStat);
+            }
+        }
+        if args.enrich_provider.is_none()
+            && [
+                "enrich_url",
+                "enrich_token_env",
+                "enrich_cache",
+                "enrich_cache_ttl",
+                "enrich_timeout",
+                "enrich_rate",
+                "enrich_max_requests",
+                "enrich_private",
+            ]
+            .iter()
+            .any(|name| matches.value_source(name) == Some(ValueSource::CommandLine))
+        {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "enrichment controls require --enrich-provider outside the default benchmark",
+            ));
+        }
+        Ok(args)
+    }
     pub fn speed_enabled(&self) -> bool {
         self.speedtest || self.only_speedtest || self.iperf3
     }
@@ -187,6 +279,9 @@ impl Cli {
         let base_url = match (&self.enrich_url, provider) {
             (Some(url), _) => url.clone(),
             (None, Provider::IpinfoLite) => "https://api.ipinfo.io/lite".into(),
+            (None, Provider::RipeStat) => {
+                "https://stat.ripe.net/data/prefix-overview/data.json".into()
+            }
             _ => {
                 return Err(Error::Config(
                     "--enrich-provider json requires --enrich-url".into(),
@@ -226,7 +321,7 @@ impl Cli {
         Ok(Some(config))
     }
     pub fn parse_args() -> Self {
-        Self::parse_from(std::env::args_os().map(|arg| {
+        let matches = Self::command().get_matches_from(std::env::args_os().map(|arg| {
             if arg == "-v4" {
                 "--v4".into()
             } else if arg == "-v6" {
@@ -234,9 +329,30 @@ impl Cli {
             } else {
                 arg
             }
-        }))
+        }));
+        Self::from_matches_with_defaults(&matches).unwrap_or_else(|error| error.exit())
     }
     pub fn validate(&self) -> Result<()> {
+        if self.output.is_some() && self.output == self.json_output {
+            return Err(Error::Config(
+                "--output and --json-output must use different new files".into(),
+            ));
+        }
+        if self.list_nodes && self.json_output.is_some() {
+            return Err(Error::Config(
+                "--json-output is for measurement reports; use --output with --list-nodes".into(),
+            ));
+        }
+        if self.benchmark
+            && (self.route || self.only_speedtest || self.only_large || self.list_nodes)
+        {
+            return Err(Error::Config("--benchmark cannot be combined with a route-only, speed-only, large-only or list-only mode".into()));
+        }
+        if self.benchmark && self.iperf3 && !self.speedtest {
+            return Err(Error::Config(
+                "use --benchmark --speedtest --iperf3 to append iPerf3 transfers".into(),
+            ));
+        }
         if self.all || self.intl {
             return Err(Error::Unsupported("--all and --intl service catalogs are not implemented; select explicit targets or nodes, optionally with --iperf3".into()));
         }
@@ -272,16 +388,16 @@ impl Cli {
                 return Err(Error::Config("plain HTTP requires --allow-http".into()));
             }
         }
-        if self.list_nodes && self.format == Format::Csv {
+        if self.list_nodes && self.format != Format::Json {
             return Err(Error::Config("--list-nodes uses JSON".into()));
         }
-        if self.route && self.format == Format::Csv {
+        if (self.route || self.benchmark) && self.format == Format::Csv {
             return Err(Error::Config(
-                "traceroute requires JSON output to preserve hop/probe details".into(),
+                "traceroute/benchmark requires text or JSON output to preserve hop details".into(),
             ));
         }
         if self.enrich_provider.is_some() && (self.list_nodes || self.format == Format::Csv) {
-            return Err(Error::Config("remote enrichment requires a measurement run with JSON output to retain per-IP status and attribution".into()));
+            return Err(Error::Config("remote enrichment requires a measurement run with text or JSON output to retain per-IP status and attribution".into()));
         }
         Ok(())
     }
@@ -289,6 +405,59 @@ impl Cli {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn resolved(args: &[&str]) -> Cli {
+        let matches = Cli::command().try_get_matches_from(args).unwrap();
+        Cli::from_matches_with_defaults(&matches).unwrap()
+    }
+    #[test]
+    fn default_preset_and_overrides_are_explicit() {
+        let default = resolved(&["x"]);
+        assert!(default.benchmark);
+        assert_eq!(default.format, Format::Text);
+        assert_eq!(default.enrich_provider, Some(Provider::RipeStat));
+        assert_eq!(
+            (
+                default.count,
+                default.parallel,
+                default.rate,
+                default.max_nodes
+            ),
+            (25, 8, 50, 32)
+        );
+        assert_eq!(
+            (default.max_hops, default.probes_per_hop, default.timeout_ms),
+            (16, 1, 500)
+        );
+        assert!(!default.speed_enabled());
+        assert!(default.validate().is_ok());
+        let custom = resolved(&[
+            "x",
+            "--benchmark",
+            "--nodes-file",
+            "nodes.tsv",
+            "--count",
+            "30",
+            "--parallel",
+            "4",
+            "--rate",
+            "10",
+            "--format",
+            "json",
+            "--no-enrichment",
+        ]);
+        assert_eq!((custom.count, custom.parallel, custom.rate), (30, 4, 10));
+        assert_eq!(custom.format, Format::Json);
+        assert!(custom.enrich_provider.is_none());
+        let explicit = resolved(&["x", "--target", "127.0.0.1"]);
+        assert!(!explicit.benchmark);
+        assert_eq!(explicit.format, Format::Json);
+        assert!(explicit.enrich_provider.is_none());
+        let filters = resolved(&["x", "--v6", "--province", "lab"]);
+        assert!(filters.benchmark && filters.v6);
+        let metadata = resolved(&["x", "--enrich-max-requests", "5", "--enrich-rate", "1"]);
+        assert_eq!(metadata.enrich_provider, Some(Provider::RipeStat));
+        assert_eq!(metadata.enrich_max_requests, 5);
+    }
     #[test]
     fn cli_bounds_and_conflicts() {
         for args in [

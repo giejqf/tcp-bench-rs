@@ -25,6 +25,7 @@ jobs:
       - run: python3 tests/launcher.py
       - run: shellcheck runTcpBench.sh scripts/package-release.sh
       - run: TCP_BENCH_IPERF_INTEROP=1 cargo +stable test --locked --test iperf_interop -- --ignored
+      - run: sudo -E env PATH="$PATH" RUSTUP_HOME="$HOME/.rustup" CARGO_HOME="$HOME/.cargo" TCP_BENCH_BENCHMARK_LAB=loopback cargo +stable test --locked --test default_benchmark -- --ignored
       - name: Build and package
         env:
           RELEASE_TAG: ${{ github.ref_name }}

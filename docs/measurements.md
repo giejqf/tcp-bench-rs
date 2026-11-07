@@ -1,5 +1,11 @@
 # Measurements and JSON v1
 
+The v0.2 [default benchmark](default-benchmark.md) combines standard/large SYN
+measurements and outward traces, then adds ASN enrichment and readable text output.
+Explicit-target modes retain their prior JSON default. The same definitions below
+apply to both modes; `large_quality` remains separate from `quality`. Skipped local
+routes have a `skipped` status/reason and no invented RTT or loss values.
+
 ## SYN quality
 
 Each attempt emits one actual TCP SYN. It does not connect, retry, or substitute
@@ -122,7 +128,8 @@ keep unrelated high-volume TCP traffic out of probe receive queues.
 JSON top level: `schema_version`, `application_version`, `started_unix_seconds`,
 `elapsed_seconds`, `cancelled`, `nodes`, `enrichment`, `enrichment_lookups`, and
 `enrichment_cache_error`. Each node includes original primary/backup metadata,
-a `quality` measurement, `traces`, HTTP(S) `throughput`, and per-direction `iperf3`.
+a `quality` measurement, optional `large_quality`, `traces`, HTTP(S) `throughput`,
+and per-direction `iperf3`. Optional `benchmark` metadata records selection/budgets.
 Measurement `status` is `not_requested`, `complete` (data is present), `error`,
 `unsupported`, or `cancelled`. Present quality/trace data has its own `completion`;
 present transfer data has `stop_reason`. Null values never imply zero.
