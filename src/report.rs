@@ -82,6 +82,8 @@ pub struct Report {
     pub enrichment_cache_error: Option<String>,
     #[serde(default)]
     pub benchmark: Option<BenchmarkInfo>,
+    #[serde(default = "not_requested")]
+    pub upload: Measurement<crate::upload::Receipt>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BenchmarkInfo {
@@ -257,6 +259,7 @@ mod tests {
             enrichment_lookups: BTreeMap::new(),
             enrichment_cache_error: None,
             benchmark: None,
+            upload: Measurement::NotRequested,
         };
         let value = serde_json::to_value(&report).unwrap();
         assert_eq!(value["schema_version"], 1);

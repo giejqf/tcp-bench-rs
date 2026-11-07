@@ -140,3 +140,7 @@ error (including remote-provider/cache-write failures); code 2 means
 CLI/configuration/discovery/privilege/report-output failure.
 Machine-readable stdout is separated from stderr diagnostics. A cancelled run
 before discovery completes cannot produce target results and exits with an error.
+
+Opt-in publication adds JSON v1 `upload`: `not_requested`, `complete` with the
+server receipt and attachment statuses, or an explicit error/cancelled state.
+Upload status is independent of measurement success; see [report-upload.md](report-upload.md).

@@ -18,6 +18,7 @@ use tokio::{
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
 const MAX_HEADERS: usize = 32768;
+type PostBody<'a> = (&'a [(&'a str, &'a str)], &'a [u8]);
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub host: String,
@@ -187,15 +188,55 @@ impl Client {
                 return Err(Error::Config("bearer authentication requires HTTPS".into()));
             }
         }
-        tokio::time::timeout(setup_timeout, self.open(url, fixed_ip, bearer))
+        tokio::time::timeout(setup_timeout, self.open(url, fixed_ip, bearer, None))
             .await
             .map_err(|_| Error::Timeout("DNS/connect/TLS/HTTP headers"))?
+    }
+    /// Bounded POST without redirects or retries. Callers also bound body reads.
+    pub async fn post(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+        timeout: Duration,
+    ) -> Result<Response> {
+        if body.len() > 32 * 1024 * 1024 || headers.len() > 32 {
+            return Err(Error::Config("POST exceeds body/header limits".into()));
+        }
+        let mut size = 0;
+        for (name, value) in headers {
+            let parsed = ::http::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| Error::Config("invalid POST header name".into()))?;
+            if [
+                "host",
+                "content-length",
+                "transfer-encoding",
+                "connection",
+                "accept-encoding",
+                "authorization",
+            ]
+            .contains(&parsed.as_str())
+                || !value.bytes().all(|b| (0x20..=0x7e).contains(&b))
+            {
+                return Err(Error::Config(
+                    "reserved POST header or invalid header value".into(),
+                ));
+            }
+            size += name.len() + value.len() + 4;
+        }
+        if size > 8192 {
+            return Err(Error::Config("POST headers exceed 8 KiB".into()));
+        }
+        tokio::time::timeout(timeout, self.open(url, None, None, Some((headers, body))))
+            .await
+            .map_err(|_| Error::Timeout("HTTP upload/headers"))?
     }
     async fn open(
         &self,
         url: &str,
         fixed_ip: Option<IpAddr>,
         bearer: Option<&str>,
+        post: Option<PostBody<'_>>,
     ) -> Result<Response> {
         let endpoint = Endpoint::parse(url)?;
         let started = Instant::now();
@@ -254,8 +295,17 @@ impl Client {
         let authorization = bearer
             .map(|token| format!("Authorization: Bearer {token}\r\n"))
             .unwrap_or_default();
+        let (method, extra) = if let Some((headers, body)) = post {
+            let mut extra = format!("Content-Length: {}\r\n", body.len());
+            for (name, value) in headers {
+                extra.push_str(&format!("{name}: {value}\r\n"));
+            }
+            ("POST", extra)
+        } else {
+            ("GET", String::new())
+        };
         let request = format!(
-            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: tcp-bench-rs/{}\r\n{authorization}Accept-Encoding: identity\r\nConnection: close\r\n\r\n",
+            "{method} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: tcp-bench-rs/{}\r\n{authorization}{extra}Accept-Encoding: identity\r\nConnection: close\r\n\r\n",
             endpoint.path,
             endpoint.authority,
             env!("CARGO_PKG_VERSION")
@@ -265,6 +315,13 @@ impl Client {
             .write_all(request.as_bytes())
             .await
             .map_err(|e| Error::io("HTTP request", e))?;
+        if let Some((_, body)) = post {
+            reader
+                .get_mut()
+                .write_all(body)
+                .await
+                .map_err(|e| Error::io("HTTP request body", e))?;
+        }
         reader
             .get_mut()
             .flush()

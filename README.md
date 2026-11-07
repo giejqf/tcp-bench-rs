@@ -7,7 +7,7 @@ HTTP/TLS and iPerf3 also work on macOS.
 
 This is an independent implementation with a documented subset of TcpQuality's
 interfaces. It does not execute measurement helpers, install software, change
-firewall/routing settings, or upload results. The default benchmark fetches a node catalog
+firewall/routing settings, or upload results without `--upload-report`. The default benchmark fetches a node catalog
 and ASN metadata; see the documented sources and opt-out controls.
 It does not claim full TcpQuality, NextTrace, or iPerf3 compatibility.
 
@@ -143,3 +143,7 @@ cargo test --locked
 
 Ordinary tests use local servers and independently authored packet fixtures.
 Privileged networking tests are ignored unless explicitly selected and gated.
+
+Publish a shareable report with `--upload-report` (opt-in). Use `--json-output report.json`
+to retain measurements and the upload receipt locally. See [publication, disclosure and
+compatibility details](docs/report-upload.md).

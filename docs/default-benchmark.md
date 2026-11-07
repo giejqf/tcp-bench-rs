@@ -46,7 +46,8 @@ they do not claim genuine reverse-path measurements. A large SYN can be treated
 differently by a destination even when ordinary SYNs work. A completed partial path
 does not prove a fault. The report shows hop timings and metadata, not proprietary
 route classifications. Speed tests remain explicit and require a byte budget.
-No results are uploaded and no ranking service is contacted.
+No results are uploaded without `--upload-report`, and no ranking service is contacted.
+See [report publication](report-upload.md) for opt-in shareable reports.
 
 ## Default enrichment
 

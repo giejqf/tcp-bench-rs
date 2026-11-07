@@ -148,3 +148,12 @@ license files, and scans for C/C++/assembly/import libraries and inline assembly
 Recheck licenses/features after any lockfile update, refresh `third-party/`, and
 preserve upstream notices. Test fixtures are independently generated; their TLS
 test key is public by design.
+
+## Report upload (local servers only)
+
+`cargo test --locked --test report_upload` exercises the CSV/header contract,
+receipt parsing, gzip/tar decoding, trace metadata, directional speed counters,
+opt-in CLI behavior, retained measurements after failure, timeout and cancellation.
+It never contacts the public reporting service. Use `--report-url` with a local
+`/generate` endpoint and `--allow-http` for manual tests; public SVG rendering is
+not covered by local protocol tests.

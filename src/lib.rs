@@ -13,6 +13,7 @@ pub mod scheduler;
 pub mod tcp_stats;
 pub mod throughput;
 pub mod traceroute;
+pub mod upload;
 
 pub use error::{Error, Result};
 pub mod benchmark;

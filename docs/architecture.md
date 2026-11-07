@@ -3,7 +3,8 @@
 One Cargo package separates packet codecs, Linux sockets, probe scheduling,
 traceroute, node discovery, HTTP/TLS and iPerf3 transfers, TCP statistics, enrichment, and
 reporting. All measurements execute in this binary. No subprocesses, executable
-downloads, updates, firewall changes, reporting uploads, or ranking participation.
+downloads, updates, firewall changes, or ranking participation. Report publication
+is explicitly enabled with `--upload-report`.
 
 The separately invoked `runTcpBench.sh` is distribution tooling explicitly requested
 for one-command setup. It downloads and verifies a pinned application release,
@@ -31,7 +32,7 @@ the build-only `cc` crate, and Windows import libraries in target-specific packa
 that are not built into Linux/macOS binaries. `zeroize` and `zmij` use inline
 assembly compiler barriers. No AWS-LC, OpenSSL, libcurl, C DNS library, or external
 measurement binary is linked into the Linux application. This inventory is specific
-to Cargo.lock; rerun the audit when updating dependencies. 67 dependency packages
+to Cargo.lock; rerun the audit when updating dependencies. 80 dependency packages
 (including build and other-target dependencies) have license/notice files retained
 under `third-party/`. Unicode-ident's Unicode-3.0 notice is included as well.
 
@@ -85,3 +86,14 @@ Primary references: [RFC 9293](https://www.rfc-editor.org/rfc/rfc9293.html),
 [Linux raw sockets](https://man7.org/linux/man-pages/man7/raw.7.html),
 [packet sockets](https://man7.org/linux/man-pages/man7/packet.7.html), and
 [kernel checksum offloads](https://docs.kernel.org/networking/checksum-offloads.html).
+
+## Report publication dependencies
+
+`src/upload/` adapts native results to the observed CSV and attachment interfaces.
+The shared bounded HTTP client handles POST without redirects/retries. `tar` has
+default features disabled (no xattr); `flate2` uses its locked `rust_backend`
+(`miniz_oxide`, not system zlib). `time` is pinned to 0.3.44 to retain Rust 1.85
+compatibility. License review of the 13 added locked packages found permissive
+MIT/Apache-2.0/0BSD/Zlib alternatives; their notices are shipped. No added package
+contains C/C++/assembly source files; CRC/Adler acceleration uses Rust architecture
+intrinsics. Existing ring/inline-assembly exceptions above still apply.

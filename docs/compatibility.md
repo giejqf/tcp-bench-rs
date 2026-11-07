@@ -1,4 +1,4 @@
-# Compatibility contract, version 0.2
+# Compatibility contract, version 0.3
 
 Interface observations used the separate `../TcpQuality` checkout at commit
 `6017af3fcb83b300b9a15b058d58062551d1c682`. Only CLI, serialized field meanings,
@@ -22,14 +22,16 @@ help use **0 (empty SYN)**. This implementation follows that observed default.
 | `--province TEXT` | Repeatable exact match against the TSV province; no translated aliases |
 | `--only-large` | IPv4 only; requires an explicit size above 40 bytes |
 | `--cernet` | Select `cernet`/`cernet2` records from the supplied node set |
-| `--route` | Outward hop discovery only; no loss run or upload |
+| `--route` | Outward hop discovery only; no loss run; uploads require --upload-report |
 | `--route-protocol` | `tcp` (default), `udp`, `both`, plus native `icmp` |
 | `--max-hops`, `--probes-per-hop` | 1–255 (default 30), 1–10 (default 3) |
 | `--port` | Explicit target port, default 5201 with `--iperf3`, otherwise 443; node records retain their own ports |
 | `--speedtest`, `--only-speedtest` | Append/only HTTP(S) download or native iPerf3 for `iperf3` nodes |
 | `--url`, `--max-bytes`, `--duration` | Explicit URL override, required byte budget, default 10 seconds of body transfer |
-| `--no-rank-upload` | Accepted; already the unconditional behavior |
-| `--debug` | Progress on stderr; no raw packet or credential logging |
+| `--upload-report`, `--report-url`, `--upload-timeout` | Opt-in CSV publication and native trace/diagnostic attachments; default 30-second upload deadline |
+| `--report-public-ipv4`, `--report-public-ipv6` | Optional explicitly supplied public-IP metadata; no implicit lookup |
+| `--no-rank-upload` | Disables report publication/ranking; conflicts with --upload-report |
+| `--debug` | Progress on stderr; with --upload-report also attaches native JSON diagnostics |
 | `--iperf3` | Native single-stream TCP; implies speed-only unless `--speedtest` is also set |
 | `--iperf-direction`, `--iperf-bitrate` | upload/download/both (default download); pacing bits/s (default 1 Mbit/s, 0 unlimited) |
 | `--enrich-provider` | RIPEstat (default benchmark), IPinfo Lite or custom JSON; --no-enrichment disables remote lookups; see remote-enrichment.md |
@@ -115,9 +117,10 @@ fields keep their meanings. CSV appends separate iPerf3 upload/download counters
 statuses, remote sender retransmissions and errors after the existing 17 columns.
 
 Not implemented: iPerf3 UDP/SCTP/multistream/authentication/server mode, HTTPS upload
-throughput, reverse-path tracing, Internet/CDN endpoint catalogs, AS route classification, report uploads,
+throughput, reverse-path tracing, Internet/CDN endpoint catalogs, AS route classification,
 ranking, automatic updates, automatic backup failover, automatic UDP traces during
 quality runs, Paris traceroute, MPLS decoding, PTR lookups, and interactive UI. Plain text reports are supported.
 Unknown flags fail. Local and remote enrichment (default in the benchmark preset) are independent
-of probes, and no remote reporting is implemented. These
+of probes. Opt-in [report publication](report-upload.md) supports the observed CSV/attachment
+protocol; native diagnostics and hosted rendering are not claimed identical. These
 limits mean there is no claim of full TcpQuality or NextTrace compatibility.

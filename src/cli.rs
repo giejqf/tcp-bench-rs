@@ -50,7 +50,7 @@ impl TraceProtocol {
 #[command(
     version,
     about = "Native TCP SYN quality, outward traceroute, HTTPS and iPerf3 throughput",
-    after_help = "No arguments runs the bounded default benchmark with ASN enrichment.\nRaw measurements require Linux CAP_NET_RAW. No results are uploaded.\nUse --no-enrichment to disable remote metadata. See docs/compatibility.md."
+    after_help = "No arguments runs the bounded default benchmark with ASN enrichment.\nRaw measurements require Linux CAP_NET_RAW. Uploads require --upload-report.\nUse --no-enrichment to disable remote metadata. See docs/compatibility.md."
 )]
 pub struct Cli {
     /// Standard/large SYN quality and outward TCP/UDP traces; implicit without a source or mode
@@ -141,9 +141,24 @@ pub struct Cli {
     /// iPerf3 target bits/second per stream; 0 explicitly means unlimited
     #[arg(long,default_value_t=1_000_000,value_parser=clap::value_parser!(u64).range(0..=100_000_000_000))]
     pub iperf_bitrate: u64,
-    /// Already the default; accepted for familiarity
-    #[arg(long)]
+    /// Disable report publication and ranking (the default)
+    #[arg(long, conflicts_with = "upload_report")]
     pub no_rank_upload: bool,
+    /// OPT IN: publish measurements and trace attachments; print the shareable URL
+    #[arg(long, conflicts_with = "list_nodes")]
+    pub upload_report: bool,
+    /// TcpQuality-compatible /generate URL (default: TCPQUALITY_REPORT_API or official service)
+    #[arg(long, requires = "upload_report")]
+    pub report_url: Option<String>,
+    /// Total upload timeout including attachments, also subject to --budget
+    #[arg(long, default_value_t=30, value_parser=clap::value_parser!(u64).range(1..=120))]
+    pub upload_timeout: u64,
+    /// Optional public IPv4 metadata to disclose; no automatic public-IP lookup
+    #[arg(long, requires = "upload_report")]
+    pub report_public_ipv4: Option<std::net::Ipv4Addr>,
+    /// Optional public IPv6 metadata to disclose; no automatic public-IP lookup
+    #[arg(long, requires = "upload_report")]
+    pub report_public_ipv6: Option<std::net::Ipv6Addr>,
     #[arg(long)]
     pub debug: bool,
     /// Local exact-IP metadata JSON; never triggers remote enrichment
@@ -184,6 +199,30 @@ pub struct Cli {
     pub json_output: Option<PathBuf>,
 }
 impl Cli {
+    pub fn report_upload(&self) -> Result<Option<crate::upload::Config>> {
+        if !self.upload_report {
+            return Ok(None);
+        }
+        if self.no_rank_upload || self.list_nodes {
+            return Err(Error::Config(
+                "report upload conflicts with --no-rank-upload/--list-nodes".into(),
+            ));
+        }
+        let config = crate::upload::Config {
+            url: self
+                .report_url
+                .clone()
+                .or_else(|| std::env::var("TCPQUALITY_REPORT_API").ok())
+                .unwrap_or_else(|| crate::upload::DEFAULT_URL.into()),
+            timeout: std::time::Duration::from_secs(self.upload_timeout),
+            allow_http: self.allow_http,
+            public_ipv4: self.report_public_ipv4,
+            public_ipv6: self.report_public_ipv6,
+            debug: self.debug,
+        };
+        config.validate()?;
+        Ok(Some(config))
+    }
     /// Resolve preset defaults without overriding explicitly supplied options.
     pub fn from_matches_with_defaults(
         matches: &clap::ArgMatches,

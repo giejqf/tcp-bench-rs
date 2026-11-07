@@ -116,8 +116,24 @@ pub fn render(report: &Report) -> String {
     }
     let _ = writeln!(
         out,
-        "Unanswered probes are not proof of congestion. Missing values: --. No report uploads.\n"
+        "Unanswered probes are not proof of congestion. Missing values: --.\n"
     );
+    match &report.upload {
+        Measurement::NotRequested => {
+            let _ = writeln!(out, "Report upload: disabled");
+        }
+        Measurement::Complete { data } => {
+            let _ = writeln!(out, "Report URL: {}", safe(&data.url));
+            for attachment in &data.attachments {
+                if attachment.status.failed() {
+                    let _ = writeln!(out, "Attachment failed: {}", safe(&attachment.endpoint));
+                }
+            }
+        }
+        other => {
+            let _ = writeln!(out, "Report upload: {}", safe(&format!("{other:?}")));
+        }
+    }
     for (index, row) in report.nodes.iter().enumerate() {
         let n = &row.node;
         let _ = writeln!(

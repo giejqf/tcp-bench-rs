@@ -34,6 +34,13 @@ async fn main() {
 async fn execute(args: Cli) -> Result<i32> {
     args.validate()?;
     let remote_config = args.remote_enrichment()?;
+    let upload_config = args.report_upload()?;
+    if let Some(config) = &upload_config {
+        eprintln!(
+            "Report upload enabled: {} (measurements and traces will be published; ranking disabled).",
+            config.url
+        );
+    }
     // Fail before contacting the catalog on unsupported/unprivileged hosts.
     if args.benchmark {
         tcp_bench_rs::platform::check_capabilities(args.v6, Protocol::Tcp)?;
@@ -43,7 +50,7 @@ async fn execute(args: Cli) -> Result<i32> {
             "Default benchmark: up to {} nodes, {} probes/check, {} probes/s, {}s total budget.",
             args.max_nodes, args.count, args.rate, args.budget
         );
-        eprintln!("Standard SYN + IPv4 1200-byte SYN + outward traces. Uploads/ranking disabled.");
+        eprintln!("Standard SYN + IPv4 1200-byte SYN + outward traces. Ranking disabled.");
         if let Some(config) = &remote_config {
             eprintln!(
                 "Enrichment: {} (public target/hop IPs disclosed; --no-enrichment disables).",
@@ -259,7 +266,7 @@ async fn execute(args: Cli) -> Result<i32> {
             .collect();
         (metadata, lookups, None)
     };
-    let failed = cancel.is_cancelled()
+    let mut failed = cancel.is_cancelled()
         || (args.benchmark && rows.iter().all(|row| matches!(row.quality,Measurement::Skipped{..})))
         || enrichment_cache_error.is_some()
         || enrichment_lookups.values().any(enrichment::remote::Lookup::failed)
@@ -273,7 +280,7 @@ async fn execute(args: Cli) -> Result<i32> {
                 || matches!(&row.large_quality,Measurement::Complete{data} if data.summary.send_errors>0)
                 || matches!(&row.throughput,Measurement::Complete{data} if data.error.is_some())
         });
-    let report = Report {
+    let mut report = Report {
         schema_version: 1,
         application_version: env!("CARGO_PKG_VERSION").into(),
         started_unix_seconds,
@@ -284,7 +291,33 @@ async fn execute(args: Cli) -> Result<i32> {
         enrichment_lookups,
         enrichment_cache_error,
         benchmark: benchmark_info,
+        upload: Measurement::NotRequested,
     };
+    if let Some(config) = upload_config {
+        report.upload = Measurement::from_result(
+            tcp_bench_rs::upload::upload(&config, &client, &report, &cancel).await,
+        );
+        match &report.upload {
+            Measurement::Complete { data } => {
+                eprintln!("Report URL: {}", data.url);
+                for attachment in &data.attachments {
+                    if attachment.status.failed() {
+                        failed = true;
+                        eprintln!(
+                            "Report attachment failed: {} ({:?})",
+                            attachment.endpoint, attachment.status
+                        );
+                    }
+                }
+            }
+            failure => {
+                failed = true;
+                eprintln!(
+                    "Report upload failed: {failure:?}. Measurements are retained in the local report."
+                );
+            }
+        }
+    }
     let bytes = match args.format {
         Format::Text => report::terminal::render(&report).into_bytes(),
         Format::Json => serde_json::to_vec_pretty(&report)?,
