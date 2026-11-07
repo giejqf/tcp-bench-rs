@@ -24,6 +24,15 @@ standard SYN quality, a separate IPv4 1200-byte SYN check, outward TCP/UDP trace
 and ASN/organization enrichment. Run from a root shell or use an installed binary
 with CAP_NET_RAW. `--help` shows help without starting a benchmark.
 
+From an ordinary user account, use a pipe when invoking `sudo`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh | sudo bash -s -- --upload-report
+```
+
+Omit `--upload-report` to keep results local. Do not prepend `sudo` to the
+process-substitution form: sudo normally closes its `/dev/fd/...` descriptor.
+
 The preset selects up to 32 nodes from TcpQuality's configurable `getNodes` CDN
 catalog, interleaved by family and ISP, with 25 probes/check and a five-minute
 budget. RIPEstat metadata lookups are enabled; use `--no-enrichment` to disable them.

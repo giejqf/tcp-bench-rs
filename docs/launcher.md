@@ -15,6 +15,17 @@ options after the closing parenthesis. `--no-enrichment` disables remote metadat
 No reports are uploaded without `--upload-report`, and no default speed tests run. Raw modes need CAP_NET_RAW
 or root; the launcher never escalates privileges itself.
 
+From an ordinary account, explicitly elevate with this stdin-based form:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh | sudo bash -s -- --upload-report
+```
+
+Omit `--upload-report` to keep results local. `sudo bash <(curl ...)` can fail with
+`/dev/fd/63: No such file or directory`: the calling shell creates the descriptor,
+then sudo normally closes it. Piping the script through standard input avoids
+that descriptor dependency. Downloading the script to a file first also works.
+
 ## Reproducible invocation and inspection
 
 For a launcher and binary pinned together to this release:

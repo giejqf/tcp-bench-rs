@@ -1,11 +1,16 @@
 # Report publication
 
 `--upload-report` opts into TcpQuality-compatible report publication. The normal
-benchmark and explicit-target runs never upload without this flag. Run on Linux:
+benchmark and explicit-target runs never upload without this flag. From an ordinary
+Linux account, use:
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh) --upload-report --json-output report.json
+curl -fsSL https://raw.githubusercontent.com/giejqf/tcp-bench-rs/main/runTcpBench.sh | sudo bash -s -- --upload-report --json-output report.json
 ```
+
+If already root, omit `sudo`. The JSON file is owned by the user running the
+benchmark (root in the example). Avoid `sudo bash <(curl ...)`: sudo normally
+closes the process-substitution descriptor. See [launcher instructions](launcher.md).
 
 The service receives the CSV measurements, target names/addresses, route traces
 (including source and responding-hop IPs, available ASN metadata and attribution),
