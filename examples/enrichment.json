@@ -1,0 +1,4 @@
+{
+  "127.0.0.1": {"asn": null, "organization": "Local test", "location": "Loopback"},
+  "::1": {"asn": null, "organization": "Local test", "location": "Loopback"}
+}

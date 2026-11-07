@@ -1,0 +1,33 @@
+[package]
+name = "tcp-bench-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Native TCP quality, traceroute, HTTPS/iPerf3 throughput, and opt-in enrichment"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+getrandom = "0.2"
+http = "1"
+httparse = "1.10"
+libc = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+socket2 = { version = "0.6.5", features = ["all"] }
+thiserror = "2"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal", "sync"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

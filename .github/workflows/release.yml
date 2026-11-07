@@ -1,0 +1,59 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3 shellcheck
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --check
+      - run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - run: cargo +stable test --locked
+      - run: python3 tests/launcher.py
+      - run: shellcheck runTcpBench.sh scripts/package-release.sh
+      - run: TCP_BENCH_IPERF_INTEROP=1 cargo +stable test --locked --test iperf_interop -- --ignored
+      - name: Build and package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          cargo +stable build --release --locked --target "$RELEASE_TARGET"
+          bash scripts/package-release.sh "$RELEASE_TAG" "$RELEASE_TARGET"
+          TCP_BENCH_TEST_ARCHIVE="$PWD/dist/tcp-bench-rs-$RELEASE_TAG-$RELEASE_TARGET.tar.gz" python3 tests/launcher.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/* --verify-tag \
+            --title "tcp-bench-rs $RELEASE_TAG" \
+            --notes "Native Linux x86-64 and ARM64 builds (glibc 2.35+), with license notices and SHA-256 checksums. See README for the launcher and explicit measurement budgets."

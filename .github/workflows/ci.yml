@@ -1,0 +1,30 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  portable:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - run: cargo +stable fmt --check
+      - run: cargo +stable clippy --all-targets -- -D warnings
+      - run: cargo +stable test --locked
+      - if: runner.os == 'Linux'
+        run: python3 tests/launcher.py
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3
+      - if: runner.os == 'Linux'
+        run: TCP_BENCH_IPERF_INTEROP=1 cargo +stable test --locked --test iperf_interop -- --ignored
+      - if: runner.os == 'Linux'
+        run: sudo -E env PATH="$PATH" RUSTUP_HOME="$HOME/.rustup" CARGO_HOME="$HOME/.cargo" TCP_BENCH_LAB=loopback cargo +stable test --locked --test linux_raw -- --ignored
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.85.0 --profile minimal
+      - run: cargo +1.85.0 test --locked

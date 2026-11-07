@@ -1,0 +1,3 @@
+type	family	province	isp	host	ip	port	target	backup_host	backup_ip	backup_port	backup_target
+cdn	4	lab	Example	fixed.test	127.0.0.1	443	/data	backup.test	127.0.0.2	443	/data
+cdn	6	lab	Example	fixed.test	::1	443	/data				

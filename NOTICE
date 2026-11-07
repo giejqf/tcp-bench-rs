@@ -1,0 +1,7 @@
+tcp-bench-rs
+Copyright 2026 tcp-bench-rs contributors
+
+This project is independently implemented and licensed under Apache-2.0.
+TcpQuality and NextTrace are separate projects; their source and service datasets
+are not included. See third-party/README.md and the accompanying license files
+for dependencies, cryptographic implementation notices, and trust-anchor terms.
