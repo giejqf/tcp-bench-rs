@@ -87,7 +87,7 @@ fn csv_preserves_wire_columns_and_separates_large_packets() {
     assert_eq!(lines[0].split(',').count(), 18);
     assert_eq!(
         lines[1],
-        "三网,IPv4,Lab,\"Example, Inc.\",fixed.test,192.0.2.10,OK,2,1,50.000,1.250,Hidden,,,,,,"
+        "三网,IPv4,Lab,\"Example, Inc.\",fixed.test,192.0.2.10,OK,2,1,50.000,1.250,dst AS64500,,,,,,"
     );
     assert!(lines[2].starts_with("IPv4大包,IPv4,"));
     if let Measurement::Complete { data } = &mut report.nodes[0].quality {
@@ -98,6 +98,159 @@ fn csv_preserves_wire_columns_and_separates_large_packets() {
     assert!(text.contains(",SKIP,2,1,,1.250,"));
     report.nodes[0].node.province = "bad\r\nline".into();
     assert!(upload::csv::encode(&report).is_err());
+}
+
+fn labels(report: &Report) -> Vec<String> {
+    String::from_utf8(upload::csv::encode(report).unwrap())
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|line| line.rsplit(',').nth(6).unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn upload_labels_use_only_matching_observations_and_keep_large_packets_distinct() {
+    use tcp_bench_rs::{
+        enrichment::Metadata,
+        packet::Protocol,
+        probe::{ProbeOutcome, ProbeStatus},
+        traceroute::Hop,
+    };
+    let mut report = fixture();
+    report.nodes[0].large_quality = report.nodes[0].quality.clone();
+    if let Measurement::Complete { data } = &mut report.nodes[0].large_quality {
+        data.packet_size = 1200;
+    }
+    for (ip, asn) in [
+        ("192.0.2.2", 64501),
+        ("192.0.2.3", 64502),
+        ("192.0.2.4", 64503),
+    ] {
+        report.enrichment.insert(
+            ip.parse().unwrap(),
+            Metadata {
+                asn: Some(asn),
+                organization: None,
+                location: None,
+            },
+        );
+    }
+    if let Measurement::Complete { data } = &mut report.nodes[0].traces[0] {
+        data.reached = false;
+        data.hops = [
+            (2, "192.0.2.2", ProbeStatus::Reply),
+            (7, "192.0.2.3", ProbeStatus::Reply),
+            (9, "192.0.2.4", ProbeStatus::Timeout),
+        ]
+        .into_iter()
+        .map(|(ttl, ip, status)| Hop {
+            hop_limit: ttl,
+            probes: vec![ProbeOutcome {
+                attempt: 1,
+                status,
+                responder: Some(ip.parse().unwrap()),
+                rtt_ms: Some(1.0),
+                reply: None,
+                error: None,
+            }],
+        })
+        .collect();
+    }
+    assert_eq!(labels(&report), ["out AS64502", "dst AS64500"]);
+    // UDP may follow a different path; it must not substitute for TCP SYN traces.
+    let mut udp = report.nodes[0].traces[0].clone();
+    if let Measurement::Complete { data } = &mut udp {
+        data.protocol = Protocol::Udp;
+        data.packet_size = 28;
+    }
+    report.nodes[0].traces.insert(0, udp);
+    assert_eq!(labels(&report), ["out AS64502", "dst AS64500"]);
+    if let Measurement::Complete { data } = &mut report.nodes[0].traces[1] {
+        data.initial_port = 80;
+    }
+    assert_eq!(labels(&report), ["dst AS64500", "dst AS64500"]);
+    if let Measurement::Complete { data } = &mut report.nodes[0].traces[1] {
+        data.initial_port = 443;
+        data.direction = "reverse".into();
+    }
+    assert_eq!(labels(&report), ["dst AS64500", "dst AS64500"]);
+    // Route-only UDP observations are valid, and retain SKIP for absent quality.
+    report.nodes[0].quality = Measurement::NotRequested;
+    report.nodes[0].large_quality = Measurement::NotRequested;
+    assert_eq!(labels(&report), ["out AS64502"]);
+}
+
+#[test]
+fn unavailable_asn_reasons_are_not_renderer_failure_sentinels() {
+    use tcp_bench_rs::enrichment::remote::{Lookup, Status};
+    let mut report = fixture();
+    report.enrichment.clear();
+    assert_eq!(labels(&report), ["ASN unavailable"]);
+    for (status, label) in [
+        (Status::Timeout, "ASN timeout"),
+        (Status::RateLimited, "ASN limited"),
+        (Status::RequestLimit, "ASN limited"),
+        (Status::Unauthorized, "ASN denied"),
+        (Status::Cancelled, "ASN cancelled"),
+        (Status::NotFound, "ASN unknown"),
+        (Status::Error, "ASN error"),
+        (Status::SkippedNonpublic, "N/A"),
+        (Status::ProviderUnavailable, "ASN unavailable"),
+        (Status::Remote, "ASN unavailable"),
+    ] {
+        report.enrichment_lookups.insert(
+            "192.0.2.10".parse().unwrap(),
+            Lookup {
+                status,
+                provider: Some("json".into()),
+                attribution: None,
+                fetched_unix_seconds: None,
+                error: None,
+            },
+        );
+        assert_eq!(labels(&report), [label]);
+    }
+    report.nodes[0].quality = Measurement::Skipped {
+        message: "No usable local route".into(),
+    };
+    assert_eq!(labels(&report), ["ASN unavailable"]);
+    let text = String::from_utf8(upload::csv::encode(&report).unwrap()).unwrap();
+    assert!(text.contains(",SKIP,,,,,ASN unavailable,"));
+}
+
+#[test]
+fn destination_asn_is_not_a_route_claim_and_handles_ipv6_and_multiple_origins() {
+    use tcp_bench_rs::enrichment::Metadata;
+    let mut report = fixture();
+    report.nodes[0].node.family = 6;
+    report.nodes[0].node.primary.ip = "2001:db8::10".parse().unwrap();
+    report.enrichment.insert(
+        "2001:db8::10".parse().unwrap(),
+        Metadata {
+            asn: Some(u32::MAX),
+            organization: None,
+            location: None,
+        },
+    );
+    assert_eq!(labels(&report), ["dst AS4294967295"]);
+    report
+        .enrichment
+        .get_mut(&"2001:db8::10".parse().unwrap())
+        .unwrap()
+        .asn = None;
+    report
+        .enrichment
+        .get_mut(&"2001:db8::10".parse().unwrap())
+        .unwrap()
+        .organization = Some("Multiple BGP origins: AS64500, AS64501".into());
+    assert_eq!(labels(&report), ["ASN unavailable"]);
+    report
+        .enrichment
+        .get_mut(&"2001:db8::10".parse().unwrap())
+        .unwrap()
+        .asn = Some(0);
+    assert_eq!(labels(&report), ["ASN unavailable"]);
 }
 
 #[test]

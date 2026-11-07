@@ -1,4 +1,5 @@
 //! Independently implemented adapter for the observable /generate CSV interface.
+use super::label::{self, Scope};
 use crate::{
     Error, Result,
     iperf3::Direction,
@@ -58,6 +59,7 @@ fn append(out: &mut String, fields: Vec<String>) -> Result<()> {
 }
 fn quality(
     out: &mut String,
+    report: &Report,
     row: &NodeReport,
     category: &str,
     measurement: &Measurement<Quality>,
@@ -66,7 +68,16 @@ fn quality(
         return Ok(());
     }
     let mut f = base(row, category);
-    f[11] = "Hidden".into(); // No proprietary route classification is claimed.
+    f[11] = label::render(
+        report,
+        row,
+        match measurement {
+            Measurement::Complete { data } => Scope::Syn {
+                packet_size: data.packet_size,
+            },
+            _ => Scope::DestinationOnly,
+        },
+    );
     f[6] = match measurement {
         Measurement::Complete { data } => {
             f[7] = data.summary.sent.to_string();
@@ -98,8 +109,8 @@ pub fn encode(report: &Report) -> Result<Vec<u8>> {
             "intl" | "internet" => "国际互联",
             _ => "三网",
         };
-        quality(&mut out, row, category, &row.quality)?;
-        quality(&mut out, row, "IPv4大包", &row.large_quality)?;
+        quality(&mut out, report, row, category, &row.quality)?;
+        quality(&mut out, report, row, "IPv4大包", &row.large_quality)?;
         // Speed rows overload columns 8..10 with upload Mbit/s, sender retransmits,
         // and download Mbit/s. Keep directions and unknown counters separate.
         for result in &row.iperf3 {
@@ -162,7 +173,7 @@ pub fn encode(report: &Report) -> Result<Vec<u8>> {
         if matches!(row.quality, Measurement::NotRequested) && !row.traces.is_empty() {
             let mut f = base(row, category);
             f[6] = "SKIP".into();
-            f[11] = "Hidden".into();
+            f[11] = label::render(report, row, Scope::RouteOnly);
             append(&mut out, f)?;
         }
     }

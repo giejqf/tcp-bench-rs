@@ -154,6 +154,11 @@ test key is public by design.
 `cargo test --locked --test report_upload` exercises the CSV/header contract,
 receipt parsing, gzip/tar decoding, trace metadata, directional speed counters,
 opt-in CLI behavior, retained measurements after failure, timeout and cancellation.
-It never contacts the public reporting service. Use `--report-url` with a local
+The automated suite never contacts the public reporting service. Use `--report-url` with a local
 `/generate` endpoint and `--allow-http` for manual tests; public SVG rendering is
 not covered by local protocol tests.
+
+Version 0.3.1 adds regressions for observed-hop versus destination ASN labels,
+IPv6 and 32-bit ASNs, timeout/nonpublic/request-limit states, and preventing a
+standard TCP or UDP trace from being labeled as a large-packet TCP route. A
+one-off hosted renderer observation is documented in [report-upload.md](report-upload.md).

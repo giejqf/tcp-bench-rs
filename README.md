@@ -156,3 +156,7 @@ Privileged networking tests are ignored unless explicitly selected and gated.
 Publish a shareable report with `--upload-report` (opt-in). Use `--json-output report.json`
 to retain measurements and the upload receipt locally. See [publication, disclosure and
 compatibility details](docs/report-upload.md).
+
+In v0.3.1, hosted ASN cells show `out AS…` (observed outward hop) or `dst AS…`
+(destination lookup), with explicit unavailable states. Older uploaded reports
+need a new run to replace the v0.3.0 `Hidden` placeholders.

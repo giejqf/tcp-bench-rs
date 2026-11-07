@@ -83,6 +83,6 @@ The motivation is a small, auditable runtime: no downloaded executables, shell p
 - `runTcpBench.sh` is an explicitly requested distribution launcher, separate from the Rust runtime: it downloads a pinned release, verifies its checksum, unpacks notices and runs the application. It must never install measurement helpers, escalate privileges automatically or check for newer versions. `.github/workflows/release.yml` builds/tests native Linux release archives; `tests/launcher.py` tests the launcher offline.
 
 - `src/upload.rs` and `src/upload/` implement opt-in report publication with a separate
-  TcpQuality CSV adapter and native tar/gzip attachments. Keep uploads behind
+  TcpQuality CSV adapter, evidence-based ASN display labels, and native tar/gzip attachments. Keep uploads behind
   `--upload-report`, ranking disabled, and local tests isolated from public services.
   See `docs/report-upload.md` for the wire contract and deliberate differences.

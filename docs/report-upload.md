@@ -54,9 +54,25 @@ TcpQuality commit `6017af3fcb83b300b9a15b058d58062551d1c682`:
 
 Native trace/diagnostic JSON is deliberately identified as `tcp-bench-rs` data,
 with outward direction labels. It is not a fabricated NextTrace/nping log format.
-No large-packet trace is synthesized from a normal trace. Unknown route
-classifications use the service's `Hidden` marker. Missing measurements stay
-empty/`SKIP`, never measured zeros. Unknown remote retransmissions are not derived
+No large-packet trace is synthesized from a normal trace. Since v0.3.1 the
+CSV route cell carries a compact evidence label:
+
+- `out AS<number>`: the known ASN at the greatest responding hop limit in an
+  eligible outward trace. For SYN results the trace must use TCP, the same
+  packet size and destination port. Route-only runs prefer TCP, then UDP, then
+  ICMP. This is a single observed hop, not a complete AS path or a backbone
+  classification; the native JSON retains every hop and provider attribution.
+- `dst AS<number>`: destination-IP ASN when no eligible enriched trace observation
+  is available. This can also label a large-packet result when only a standard
+  trace exists; it does not claim a large-packet route was measured.
+- `ASN unavailable`, `ASN timeout`, `ASN limited`, `ASN denied`, `ASN cancelled`,
+  `ASN unknown`, `ASN error`, or `N/A`: explicit metadata availability/reasons.
+  Multiple BGP origins without a single ASN are not reduced to an invented ASN.
+
+The hosted renderer converts `Hidden` and `NoData` to `failed`. Version 0.3.0
+always sent `Hidden`, discarding successful enrichment from the displayed cells.
+Version 0.3.1 avoids both sentinels. Labels do not change quality status, loss,
+RTT or missing values: missing measurements remain empty/`SKIP`, never zeros. Unknown remote retransmissions are not derived
 from local counters. The hosted renderer decides how to present these values;
 this does not claim identical SVG layout or proprietary route classifications.
 Ranking participation and its particular speed-test workflow remain unsupported.
@@ -92,5 +108,15 @@ outside this client's control.
 local HTTP servers to check headers, CSV, decoded tar/gzip contents, receipt
 validation, no-retry errors, timeouts, cancellation, CLI opt-in and retained output.
 The existing TLS tests exercise the shared HTTP transport and certificate checks.
-No report is submitted to the public service by development tests or CI; hosted
-SVG rendering and server-side retention are not validated by these tests.
+Automated development tests and CI never submit to the public service.
+For the v0.3.1 fix, a one-off nine-row synthetic CSV (documentation IP 192.0.2.1,
+private ASNs 64500/64501, ranking disabled, no probes) was submitted and read back
+from the hosted renderer. It confirmed that `Hidden`/`NoData` display as `failed`
+and that `out AS64500`, `dst AS64500`, `ASN unavailable` and `N/A` are retained.
+The check sent an explicit synthetic-test time header, but the service replaced
+that unrecognized header value with its own report timestamp. No hosted HTML or
+provider datasets are bundled as test fixtures. Server-side retention is not
+validated. Regression tests use independently authored local data.
+
+Already-published v0.3.0 reports retain their stored values. Run v0.3.1 with
+`--upload-report` to create a corrected report; existing reports are not rewritten.

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 
 readonly repository='giejqf/tcp-bench-rs'
-readonly version="${TCP_BENCH_RS_VERSION:-v0.3.0}"
+readonly version="${TCP_BENCH_RS_VERSION:-v0.3.1}"
 temporary=''
 child=''
 

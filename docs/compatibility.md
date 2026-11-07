@@ -1,4 +1,4 @@
-# Compatibility contract, version 0.3
+# Compatibility contract, version 0.3.1
 
 Interface observations used the separate `../TcpQuality` checkout at commit
 `6017af3fcb83b300b9a15b058d58062551d1c682`. Only CLI, serialized field meanings,
@@ -122,5 +122,6 @@ ranking, automatic updates, automatic backup failover, automatic UDP traces duri
 quality runs, Paris traceroute, MPLS decoding, PTR lookups, and interactive UI. Plain text reports are supported.
 Unknown flags fail. Local and remote enrichment (default in the benchmark preset) are independent
 of probes. Opt-in [report publication](report-upload.md) supports the observed CSV/attachment
-protocol; native diagnostics and hosted rendering are not claimed identical. These
+protocol; v0.3.1 displays observed-hop or destination ASNs instead of the old Hidden
+placeholder. Native diagnostics and hosted rendering are not claimed identical. These
 limits mean there is no claim of full TcpQuality or NextTrace compatibility.

@@ -13,6 +13,7 @@ use std::{
 use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 mod archive;
 pub mod csv;
+mod label;
 
 pub const DEFAULT_URL: &str = "https://tcpquality.ibsgss.uk/generate";
 pub struct Config {

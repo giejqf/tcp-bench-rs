@@ -13,7 +13,7 @@ import time
 import unittest
 
 LAUNCHER = Path(__file__).resolve().parents[1] / "runTcpBench.sh"
-ASSET = "tcp-bench-rs-v0.3.0-x86_64-unknown-linux-gnu.tar.gz"
+ASSET = "tcp-bench-rs-v0.3.1-x86_64-unknown-linux-gnu.tar.gz"
 PROGRAM = b'''#!/usr/bin/env python3
 import json, os, signal, sys, time
 if os.environ.get("FIXTURE_WAIT"):
@@ -36,7 +36,7 @@ class LauncherTests(unittest.TestCase):
         self.scratch.mkdir()
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
                         TMPDIR=str(self.scratch), FIXTURE_ROOT=str(self.root),
-                        TCP_BENCH_RS_VERSION="v0.3.0")
+                        TCP_BENCH_RS_VERSION="v0.3.1")
         self.script("uname", '#!/bin/bash\nif [[ "$1" == -s ]]; then echo Linux; else echo "${FIXTURE_ARCH:-x86_64}"; fi\n')
         self.script("getconf", '#!/bin/bash\necho "${FIXTURE_LIBC:-glibc 2.35}"\n')
         self.script("curl", '''#!/usr/bin/env python3
@@ -47,7 +47,7 @@ assert args[0] == "--disable"
 assert args[args.index("--proto")+1] == "=https"
 assert args[args.index("--proto-redir")+1] == "=https"
 assert "--max-time" in args and "--max-filesize" in args
-assert args[-1].startswith("https://github.com/giejqf/tcp-bench-rs/releases/download/v0.3.0/")
+assert args[-1].startswith("https://github.com/giejqf/tcp-bench-rs/releases/download/v0.3.1/")
 with (root / "requests").open("a") as f: f.write(args[-1] + "\\n")
 if os.environ.get("FIXTURE_DOWNLOAD_FAIL"): sys.exit(22)
 source = root / ("checksum" if args[-1].endswith(".sha256") else "archive")
@@ -118,7 +118,7 @@ shutil.copyfile(source, args[args.index("--output")+1])
         self.env["FIXTURE_ARCH"] = os.uname().machine
         result = self.run_launcher("--version")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "tcp-bench-rs 0.3.0")
+        self.assertEqual(result.stdout.strip(), "tcp-bench-rs 0.3.1")
 
     def test_checksum_failure_does_not_execute(self):
         (self.root / "checksum").write_text(f"{'0' * 64}  {ASSET}\n")
